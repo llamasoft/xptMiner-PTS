@@ -84,6 +84,9 @@
     <ClInclude Include="ticker.h">
       <Filter>Source Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="protoshareMiner.h">
+      <Filter>Source Files\algorithm\protoshares</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">

@@ -99,7 +99,8 @@ __constant ulong IV[] = {
 typedef union { ulong b64[16]; uint b32[32]; uchar b8[128]; } hash_input;
 
 
-__kernel void hash_nonce(constant uint *mid_hash, global ulong *hash_list, global uint *hash_list) {
+__kernel __attribute(( work_group_size_hint(256, 1, 1) ))
+void hash_nonce(constant uint *mid_hash, global ulong *hash_list, global uint *hash_list) {
 
     uint seed_nonce = HASHES_PER_WORKER * BIRTHDAYS_PER_HASH * get_global_id(0);
     uint cur_nonce = seed_nonce;
@@ -208,8 +209,9 @@ __kernel void hash_nonce(constant uint *mid_hash, global ulong *hash_list, globa
 }
 
 
-__kernel void bitonicSort(global ulong* hashes,    global uint* nonces,
-                          local  ulong* hash_temp, local  uint* nonce_temp)
+__kernel __attribute(( work_group_size_hint(64, 1, 1) ))
+void bitonicSort(global ulong* hashes,    global uint* nonces,
+                 local  ulong* hash_temp, local  uint* nonce_temp)
 {
     int i = get_local_id(0);
     int wgs = get_local_size(0);
@@ -227,7 +229,6 @@ __kernel void bitonicSort(global ulong* hashes,    global uint* nonces,
     left_nonce = nonces[i];
     hash_temp[i]  = left_hash;
     nonce_temp[i] = left_nonce;
-    
     
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -265,4 +266,19 @@ __kernel void bitonicSort(global ulong* hashes,    global uint* nonces,
     // Write output
     hashes[i] = left_hash;
     nonces[i] = left_nonce;
+}
+
+
+__kernel void seek_hits(global ulong* hashes,  global uint* nonces,
+                        global uint*  nonce_a, global uint* nonce_b,
+                        global uint*  output_qty)
+{
+    uint id = get_global_id(0);
+    if (id == 0) { return; }
+    
+    if (hashes[id - 1] == hashes[id]) {
+        int pos = atomic_inc(output_qty);
+        nonce_a[pos] = nonces[id - 1];
+        nonce_b[pos] = nonces[id];
+    }
 }

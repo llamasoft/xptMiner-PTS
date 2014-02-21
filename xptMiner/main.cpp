@@ -1,7 +1,8 @@
 ﻿#include "global.h"
 #include "ticker.h"
 #include "OpenCLObjects.h"
-#include "metiscoinMiner.h"
+// #include "metiscoinMiner.h"
+#include "protoshareMiner.h"
 #include <signal.h>
 #include <stdio.h>
 #include <cstring>
@@ -76,7 +77,7 @@ commandlineInput_t commandlineInput;
  */
 void xptMiner_submitShare(minerProtosharesBlock_t* block)
 {
-    printf("Share found! (Blockheight: %d)\n", block->height);
+    printf("Share found! (NonceA: %#010x, NonceB: %#010x, Blockheight: %d)\n", block->birthdayA, block->birthdayB, block->height);
     EnterCriticalSection(&cs_xptClient);
     if( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true )
     {
@@ -220,7 +221,7 @@ void *xptMiner_minerThread(void *arg)
     minerScryptBlock_t minerScryptBlock = {0};
     minerMetiscoinBlock_t minerMetiscoinBlock = {0};
     minerPrimecoinBlock_t minerPrimecoinBlock = {0}; 
-    MetiscoinOpenCL *processor = gpu_processors.back();
+    ProtoshareOpenCL *processor = gpu_processors.back();
     gpu_processors.pop_back();
 
     // todo: Eventually move all block structures into a union to save stack size

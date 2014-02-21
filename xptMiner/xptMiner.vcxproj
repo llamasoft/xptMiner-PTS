@@ -178,6 +178,7 @@
     <ClInclude Include="global.h" />
     <ClInclude Include="jhlib.h" />
     <ClInclude Include="algorithm.h" />
+    <ClInclude Include="protoshareMiner.h" />
     <ClInclude Include="scrypt.h" />
     <ClInclude Include="aes_helper.h" />
     <ClInclude Include="sha2.h" />
