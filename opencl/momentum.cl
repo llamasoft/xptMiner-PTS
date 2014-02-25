@@ -6,7 +6,7 @@
 // PTS: Pstkk1gZCxc4GEwS1eBAykYwVmcubU1P8L
 
 
-// #define HASHES_PER_WORKER  ( 16 )
+#define HASHES_PER_WORKER  ( 1 )
 #define MAX_MOMENTUM_NONCE ( 1 << 26 )
 #define MAX_MOMENTUM_MASK  ( 0x3FFFFFF )
 #define SEARCH_SPACE_BITS  ( 50 )
@@ -21,8 +21,8 @@
 
 #define SWAP64(n) as_ulong(as_uchar8(n).s76543210)
 
-#define ROL(x, s)   rotate((ulong)(x), (ulong)(s))
-#define ROR(x, s)   ROL((x), (64 - (s)))
+#define ROTL(x, s)   rotate((ulong)(x), (ulong)(s))
+#define ROTR(x, s)   ROTL((x), (64 - (s)))
 // #define ROTR(x,s)	(((x)>>s) | (x)<<(64-s))
 #define Sigma0(x)	(ROTR((x),28) ^ ROTR((x),34) ^ ROTR((x),39))
 #define Sigma1(x)	(ROTR((x),14) ^ ROTR((x),18) ^ ROTR((x),41))
@@ -100,11 +100,11 @@ typedef union { ulong b64[16]; uint b32[32]; uchar b8[128]; } hash_input;
 
 
 __kernel __attribute(( work_group_size_hint(256, 1, 1) ))
-void hash_nonce(constant uint *mid_hash, global ulong *hash_list, global uint *hash_list) {
+void hash_nonce(constant uint *mid_hash, global ulong *hash_list, global uint *nonce_list) {
 
     uint seed_nonce = HASHES_PER_WORKER * BIRTHDAYS_PER_HASH * get_global_id(0);
     uint cur_nonce = seed_nonce;
-    // if (seed_nonce >= MAX_MOMENTUM_NONCE) { return; }
+    if (seed_nonce >= MAX_MOMENTUM_NONCE) { return; }
 
 
     //////////  BEGIN SHA512 //////////

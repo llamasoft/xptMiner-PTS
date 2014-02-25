@@ -48,7 +48,7 @@ struct
 uint32 uniqueMerkleSeedGenerator = 0;
 uint32 miningStartTime = 0;
 
-std::vector<MetiscoinOpenCL *> gpu_processors;
+std::vector<ProtoshareOpenCL *> gpu_processors;
 
 typedef struct  
 {
@@ -66,7 +66,6 @@ typedef struct
     // mode option
     uint32 mode;
     float donationPercent;
-    uint32 step_size;
 } commandlineInput_t;
 
 commandlineInput_t commandlineInput;
@@ -232,23 +231,23 @@ void *xptMiner_minerThread(void *arg)
         EnterCriticalSection(&workDataSource.cs_work);
         if( workDataSource.height > 0 )
         {
-            if( workDataSource.algorithm == ALGORITHM_METISCOIN )
+            if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
             {
-                // get metiscoin work data
-                minerMetiscoinBlock.version = workDataSource.version;
-                minerMetiscoinBlock.nTime = (uint32)time(NULL) + workDataSource.timeBias;
-                minerMetiscoinBlock.nBits = workDataSource.nBits;
-                minerMetiscoinBlock.nonce = 0;
-                minerMetiscoinBlock.height = workDataSource.height;
-                memcpy(minerMetiscoinBlock.merkleRootOriginal, workDataSource.merkleRootOriginal, 32);
-                memcpy(minerMetiscoinBlock.prevBlockHash, workDataSource.prevBlockHash, 32);
-                memcpy(minerMetiscoinBlock.targetShare, workDataSource.targetShare, 32);
-                minerMetiscoinBlock.uniqueMerkleSeed = uniqueMerkleSeedGenerator;
-                uniqueMerkleSeedGenerator++;
-                // generate merkle root transaction
-                bitclient_generateTxHash(sizeof(uint32), (uint8*)&minerMetiscoinBlock.uniqueMerkleSeed, workDataSource.coinBase1Size, workDataSource.coinBase1, workDataSource.coinBase2Size, workDataSource.coinBase2, workDataSource.txHash);
-                bitclient_calculateMerkleRoot(workDataSource.txHash, workDataSource.txHashCount+1, minerMetiscoinBlock.merkleRoot);
-                hasValidWork = true;
+				// get protoshares work data
+				minerProtosharesBlock.version = workDataSource.version;
+				minerProtosharesBlock.nTime = (uint32)time(NULL) + workDataSource.timeBias;
+				minerProtosharesBlock.nBits = workDataSource.nBits;
+				minerProtosharesBlock.nonce = 0;
+				minerProtosharesBlock.height = workDataSource.height;
+				memcpy(minerProtosharesBlock.merkleRootOriginal, workDataSource.merkleRootOriginal, 32);
+				memcpy(minerProtosharesBlock.prevBlockHash, workDataSource.prevBlockHash, 32);
+				memcpy(minerProtosharesBlock.targetShare, workDataSource.targetShare, 32);
+				minerProtosharesBlock.uniqueMerkleSeed = uniqueMerkleSeedGenerator;
+				uniqueMerkleSeedGenerator++;
+				// generate merkle root transaction
+				bitclient_generateTxHash(sizeof(uint32), (uint8*)&minerProtosharesBlock.uniqueMerkleSeed, workDataSource.coinBase1Size, workDataSource.coinBase1, workDataSource.coinBase2Size, workDataSource.coinBase2, workDataSource.txHash);
+				bitclient_calculateMerkleRoot(workDataSource.txHash, workDataSource.txHashCount+1, minerProtosharesBlock.merkleRoot);
+				hasValidWork = true;
             }
         }
         LeaveCriticalSection(&workDataSource.cs_work);
@@ -258,9 +257,9 @@ void *xptMiner_minerThread(void *arg)
             continue;
         }
         // valid work data present, start processing workload
-        if( workDataSource.algorithm == ALGORITHM_METISCOIN )
+        if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
         {
-            processor->metiscoin_process(&minerMetiscoinBlock);
+            processor->protoshare_process(&minerProtosharesBlock);
         }
         else
         {
@@ -334,10 +333,8 @@ void xptMiner_xptQueryWorkLoop()
     xptClient = xptMiner_initateNewXptConnectionObject();
     if(minerSettings.requestTarget.donationPercent > 0.1f)
     {
-        // Girino
-        xptClient_addDeveloperFeeEntry(xptClient, "MTq5EaAY9DvVXaByMEjJwVEhQWF1VVh7R8", getFeeFromDouble(minerSettings.requestTarget.donationPercent * 1.0 / 3.0));
         // GigaWatt
-        xptClient_addDeveloperFeeEntry(xptClient, "MEu8jBkkVvTLwvpiPjWC9YntyDH2u5KwVy", getFeeFromDouble(minerSettings.requestTarget.donationPercent * 2.0 / 3.0));
+        xptClient_addDeveloperFeeEntry(xptClient, "Pstkk1gZCxc4GEwS1eBAykYwVmcubU1P8L", getFeeFromDouble(minerSettings.requestTarget.donationPercent));
     }
 
     uint32 timerPrintDetails = getTimeMilliseconds() + 8000;
@@ -356,8 +353,8 @@ void xptMiner_xptQueryWorkLoop()
                 {
                   // speed is represented as khash/s (in steps of 0x8000)
                   if( passedSeconds > 5 ) {
-                      speedRate = (double)totalCollisionCount * (double)(commandlineInput.step_size) / (double)passedSeconds / 1000.0;
-					  printf("kHash/s: %.2lf Shares total: %ld (Valid: %ld, Invalid: %ld", speedRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+                      speedRate = (double)totalCollisionCount / (double)passedSeconds / 60.0;
+					  printf("collisions/min: %.4lf Shares total: %ld (Valid: %ld, Invalid: %ld", speedRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
 				  }
 
 				  if ( passedSeconds > 600 ) {
@@ -393,7 +390,7 @@ void xptMiner_xptQueryWorkLoop()
             else
             {
                 // is known algorithm?
-                if( xptClient->clientState == XPT_CLIENT_STATE_LOGGED_IN && (xptClient->algorithm != ALGORITHM_METISCOIN) )
+                if( xptClient->clientState == XPT_CLIENT_STATE_LOGGED_IN && (xptClient->algorithm != ALGORITHM_PROTOSHARES) )
                 {
                     printf("The login is configured for an unsupported algorithm.\n");
                     printf("Make sure you miner login details are correct\n");
@@ -639,9 +636,6 @@ void xptMiner_parseCommandline(int argc, char **argv)
         exit(0);
     }
 
-	commandlineInput.step_size = 0x80000;
-	if (step_factor > 0) { commandlineInput.step_size <<= step_factor; }
-	if (step_factor < 0) { commandlineInput.step_size >>= (-1 * step_factor); }
 }
 
 
@@ -690,18 +684,13 @@ int main(int argc, char** argv)
     minerSettings.protoshareMemoryMode = commandlineInput.ptsMemoryMode;
     printf("\xC9\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBB\n");
     printf("\xBA                                                  \xBA\n");
-    printf("\xBA  xptMiner (v1.1) + GPU Metiscoin Miner (v0.4gg)  \xBA\n");
-    printf("\xBA  Author: Girino   (GPU Metiscoin Miner)          \xBA\n");
-    printf("\xBA          GigaWatt (GPU Optimizations)            \xBA\n");
+    printf("\xBA  xptMiner (v1.1) + GPU Protoshare Miner (v0.1g)  \xBA\n");
+    printf("\xBA  Author: GigaWatt (GPU Code)                     \xBA\n");
     printf("\xBA          jh00     (xptMiner)                     \xBA\n");
     printf("\xBA                                                  \xBA\n");
     printf("\xBA  Please donate:                                  \xBA\n");
-    printf("\xBA      Girino:                                     \xBA\n");
-    printf("\xBA      MTC: MTq5EaAY9DvVXaByMEjJwVEhQWF1VVh7R8     \xBA\n");
-    printf("\xBA      BTC: 1GiRiNoKznfGbt8bkU1Ley85TgVV7ZTXce     \xBA\n");
-    printf("\xBA                                                  \xBA\n");
     printf("\xBA      GigaWatt:                                   \xBA\n");
-    printf("\xBA      MTC: MEu8jBkkVvTLwvpiPjWC9YntyDH2u5KwVy     \xBA\n");
+    printf("\xBA      PTS: Pstkk1gZCxc4GEwS1eBAykYwVmcubU1P8L     \xBA\n");
     printf("\xBA      BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV     \xBA\n");
     printf("\xBA                                                  \xBA\n");
     printf("\xC8\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBC\n");
@@ -709,7 +698,6 @@ int main(int argc, char** argv)
     uint32 mbTable[] = {512,256,128,32,8};
     //printf("Using %d megabytes of memory per thread\n", mbTable[min(commandlineInput.ptsMemoryMode,(sizeof(mbTable)/sizeof(mbTable[0])))]);
     printf("Using %d threads\n", commandlineInput.numThreads);
-    printf("Using step size: %#x\n", commandlineInput.step_size);
     printf("\n");
     
 #ifdef _WIN32
@@ -766,8 +754,7 @@ int main(int argc, char** argv)
     printf("Initializing workers...\n");
     for (int i = 0; i < commandlineInput.deviceList.size(); i++) {
         printf("Initing device %d...\n", i);
-        gpu_processors.push_back(new MetiscoinOpenCL(commandlineInput.deviceList[i],
-                                                     commandlineInput.step_size));
+        gpu_processors.push_back(new ProtoshareOpenCL(commandlineInput.deviceList[i]));
 
     }
     printf("\nAll GPUs Initialized...\n");

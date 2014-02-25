@@ -6,7 +6,7 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-
+#define MEASURE_TIME
 
 bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midHash, uint32 indexA, uint32 indexB)
 {
@@ -103,7 +103,7 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
 }
 
 
-ProtoshareOpenCL::ProtoshareOpenCL(int _device_num, uint32 _step_size) {
+ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	this->device_num = _device_num;
 
 	printf("Initializing GPU %d\n", device_num);
@@ -142,10 +142,12 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num, uint32 _step_size) {
 	nonces = device->getContext()->createBuffer(MAX_MOMENTUM_NONCE * sizeof(cl_uint) , CL_MEM_READ_WRITE, NULL);
 
 	hash_temp  = device->getContext()->createBuffer(sort_wgs * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
-    nonce_temp = device->getContext()->createBuffer(sort_wgs * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+    nonce_temp = device->getContext()->createBuffer(sort_wgs * sizeof(cl_uint) , CL_MEM_READ_WRITE, NULL);
     
     nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
     nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+
+	mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
 
 	q = device->getContext()->createCommandQueue(device);
 }
@@ -170,6 +172,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	sha256_final(&c256, midHash);
 
 #ifdef MEASURE_TIME
+	printf("Starting...\n");
 	uint32 begin = getTimeMilliseconds();
     uint32 end_hashing, end_sorting, end_seeking;
 #endif
@@ -186,6 +189,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 #ifdef MEASURE_TIME
 	q->finish();
+	printf("Survived hashing...\n");
 	end_hashing = getTimeMilliseconds();
 #endif
 
@@ -200,6 +204,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 #ifdef MEASURE_TIME
 	q->finish();
+	printf("Survived sorting...\n");
 	end_sorting = getTimeMilliseconds();
 #endif
 

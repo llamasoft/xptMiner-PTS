@@ -4,8 +4,8 @@
 
 
 class ProtoshareOpenCL {
-public
-	ProtoshareOpenCL(int device_num, uint32 step_size);
+public:
+	ProtoshareOpenCL(int device_num);
 	void protoshare_process(minerProtosharesBlock_t* block);
 
 private:
