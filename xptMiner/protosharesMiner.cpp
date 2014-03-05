@@ -6,9 +6,19 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-//#define LOCAL_ALGO
-//#define MEASURE_TIME
-//#define VERIFY_RESULTS
+#define LOCAL_ALGO
+// #define MEASURE_TIME
+// #define VERIFY_RESULTS
+
+#define SWAP64(n)               \
+   (  ((n)               << 56) \
+   | (((n) & 0xff00)     << 40) \
+   | (((n) & 0xff0000)   << 24) \
+   | (((n) & 0xff000000) <<  8) \
+   | (((n) >>  8) & 0xff000000) \
+   | (((n) >> 24) &   0xff0000) \
+   | (((n) >> 40) &     0xff00) \
+   |  ((n) >> 56)             )
 
 extern commandlineInput_t commandlineInput;
 
@@ -173,16 +183,32 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	uint32 target = *(uint32*)(block->targetShare+28);
 	OpenCLDevice* device = OpenCLMain::getInstance().getDevice(device_num);
 
-	uint8 midHash[32];
+	uint32 midHash[8];
     // midHash = sha256(sha256(block))
 	sha256_ctx c256;
 	sha256_init(&c256);
 	sha256_update(&c256, (unsigned char*)block, 80);
-	sha256_final(&c256, midHash);
+	sha256_final(&c256, (unsigned char*)midHash);
 
 	sha256_init(&c256);
 	sha256_update(&c256, (unsigned char*)midHash, 32);
-	sha256_final(&c256, midHash);
+	sha256_final(&c256, (unsigned char*)midHash);
+
+    union { uint64 b64[16]; uint32 b32[32]; } hash_state;
+    hash_state.b32[0] = 0; // Reserved for nonce
+    hash_state.b32[1] = midHash[0];
+    hash_state.b32[2] = midHash[1];
+    hash_state.b32[3] = midHash[2];
+    hash_state.b32[4] = midHash[3];
+    hash_state.b32[5] = midHash[4];
+    hash_state.b32[6] = midHash[5];
+    hash_state.b32[7] = midHash[6];
+    hash_state.b32[8] = midHash[7];
+    hash_state.b32[9] = 0x80; // High 1 bit to mark end of input
+
+    // Swap the non-zero b64's except the first (so we can mix in the nonce later)
+    for (uint8 i = 1; i < 5; ++i) { hash_state.b64[i] = SWAP64(hash_state.b64[i]); }
+
 
 #ifdef MEASURE_TIME
 	printf("Hashing...\n");
@@ -209,7 +235,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	kernel_hash->addGlobalArg(nonce_b);
 	kernel_hash->addGlobalArg(nonce_qty);
 
-	q->enqueueWriteBuffer(mid_hash, midHash, 32 * sizeof(cl_uint));
+    q->enqueueWriteBuffer(mid_hash, hash_state.b32, 32 * sizeof(cl_uint));
 	q->enqueueWriteBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 
 	q->enqueueKernel1D(kernel_hash, total_work, wgs);
@@ -226,7 +252,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 #endif
 
 	for (int i = 0; i < result_qty; i++) {
-		protoshares_revalidateCollision(block, midHash, result_a[i], result_b[i]);
+		protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
 	}
 
 
@@ -242,7 +268,11 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 	q->enqueueWriteBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
 
+#ifndef LOCAL_ALGO
 	q->enqueueKernel1D(kernel_reset, (1 << buckets_log2), wgs);
+#else
+    q->enqueueKernel1D(kernel_reset, MAX_MOMENTUM_NONCE, wgs);
+#endif
 
 	q->enqueueReadBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
 	q->finish();

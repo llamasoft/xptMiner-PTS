@@ -347,7 +347,7 @@ void xptMiner_xptQueryWorkLoop()
                   if( passedSeconds > 5 ) {
                       speedRate = (double)totalCollisionCount / (double)passedSeconds * 60.0;
 					  tableRate = (double)totalTableCount / (double)passedSeconds * 60;
-					  printf("collisions/min: %.2lf, tables/min: %.2lf, drop rate %.2f%%;  Shares total: %ld (Valid: %ld, Invalid: %ld",
+					  printf("collisions/min: %.2lf, tables/min: %.2lf, drop rate %.2f%%; Shares total: %ld (Valid: %ld, Invalid: %ld",
 						speedRate, tableRate, 100.0 * totalOverflowPct / totalTableCount, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
 				  }
 
