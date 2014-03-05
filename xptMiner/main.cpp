@@ -12,6 +12,8 @@
 char* minerVersionString = "xptMiner 1.5gg";
 
 volatile uint32 totalCollisionCount;
+volatile uint32 totalTableCount;
+volatile double totalOverflowPct;
 volatile uint32 totalShareCount;
 volatile uint32 invalidShareCount;
 volatile uint32 monitorCurrentBlockHeight;
@@ -50,25 +52,14 @@ uint32 miningStartTime = 0;
 
 std::vector<ProtoshareOpenCL *> gpu_processors;
 
-typedef struct  
-{
-    char* workername;
-    char* workerpass;
-    char* host;
-    sint32 port;
-    sint32 numThreads;
-    uint32 ptsMemoryMode;
-    // GPU / OpenCL options
-    uint32 deviceNum;
-    bool listDevices;
-    std::vector<int> deviceList;
-
-    // mode option
-    uint32 mode;
-    float donationPercent;
-} commandlineInput_t;
-
 commandlineInput_t commandlineInput;
+
+uint32 nearest_pow2(uint32 n) {
+	uint32 temp = 1;
+	while (n > 0) { temp <<= 1; n >>= 1; }
+	
+	return temp >> 1;
+}
 
 
 /*
@@ -348,13 +339,16 @@ void xptMiner_xptQueryWorkLoop()
             {
                 uint32 passedSeconds = (uint32)time(NULL) - miningStartTime;
                 double speedRate = 0.0;
+				double tableRate = 0.0;
 				double sharesPerHour = 0.0;
-                if( workDataSource.algorithm == ALGORITHM_METISCOIN )
+                if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
                 {
                   // speed is represented as khash/s (in steps of 0x8000)
                   if( passedSeconds > 5 ) {
-                      speedRate = (double)totalCollisionCount / (double)passedSeconds / 60.0;
-					  printf("collisions/min: %.4lf Shares total: %ld (Valid: %ld, Invalid: %ld", speedRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+                      speedRate = (double)totalCollisionCount / (double)passedSeconds * 60.0;
+					  tableRate = (double)totalTableCount / (double)passedSeconds * 60;
+					  printf("collisions/min: %.2lf, tables/min: %.2lf, drop rate %.2f%%;  Shares total: %ld (Valid: %ld, Invalid: %ld",
+						speedRate, tableRate, 100.0 * totalOverflowPct / totalTableCount, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
 				  }
 
 				  if ( passedSeconds > 600 ) {
@@ -431,6 +425,8 @@ void xptMiner_xptQueryWorkLoop()
                 printf("Connected to server using x.pushthrough(xpt) protocol\n");
                 miningStartTime = (uint32)time(NULL);
                 totalCollisionCount = 0;
+				totalTableCount = 0;
+				totalOverflowPct = 0.0;
             }
             Sleep(1);
         }
@@ -448,12 +444,12 @@ void xptMiner_printHelp()
     puts("   -p                   The password used for login");
     puts("   -t <num>             The number of threads for mining (default is 1)");
     puts("   -f <num>             Donation amount for dev (default donates 3.0% to dev)");
-	puts("   -s <num>             The step factor for GPU mining (integer between -4 and 8, default is 0)");
-	puts("                        Determines the number of hashes per step: 0x80000 * 2^X");
-	puts("                            e.g.: -1 = half the work per pass, 1 = twice the work per pass");
+	puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
+	puts("   -b <num>			  Number of buckets to use in hashing step");
+	puts("                        Uses 2^N buckets (range = 12 to 25, default is 12)");
     puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
     puts("Example usage:");
-    puts("  xptminer.exe -o ypool.net -u workername.mtc_1 -p pass -d 0");
+    puts("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0");
 }
 
 void xptMiner_parseCommandline(int argc, char **argv)
@@ -462,7 +458,8 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
     // Default values
     commandlineInput.donationPercent = 3.0f;
-	int step_factor = 0;
+	uint32 wgs = 0;
+	uint32 buckets_log2 = 12;
 
     while( cIdx < argc )
     {
@@ -526,26 +523,6 @@ void xptMiner_parseCommandline(int argc, char **argv)
             }
             cIdx++;
         }
-        else if( memcmp(argument, "-m512", 6)==0 )
-        {
-            commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_512;
-        }
-        else if( memcmp(argument, "-m256", 6)==0 )
-        {
-            commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_256;
-        }
-        else if( memcmp(argument, "-m128", 6)==0 )
-        {
-            commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_128;
-        }
-        else if( memcmp(argument, "-m32", 5)==0 )
-        {
-            commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_32;
-        }
-        else if( memcmp(argument, "-m8", 4)==0 )
-        {
-            commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_8;
-        }
         else if( memcmp(argument, "-f", 3)==0 )
         {
             if( cIdx >= argc )
@@ -583,42 +560,42 @@ void xptMiner_parseCommandline(int argc, char **argv)
             commandlineInput.deviceList.push_back(atoi(list.c_str()));
             cIdx++;
         }
-        /*
-        else if( memcmp(argument, "-a", 2)==0 )
+        else if( memcmp(argument, "-w", 2)==0 )
         {
             if ( cIdx >= argc )
             {
-                printf("Missing algorithm number after %s option\n", argument);
+                printf("Missing work group size after %s option\n", argument);
                 exit(0);
             }
 
-            uint32 algo = atoi(argv[cIdx]);
-            if (algo < 1 || algo > 2)
+            wgs = atoi(argv[cIdx]);
+            if (wgs < 0)
             {
-                printf("Algorithm value '%d' is invalid.  Valid algorithm values are 1 or 2.\n", algo);
+                printf("Work group size '%d' is invalid.  Valid values are 0 or powers of 2.\n", wgs);
                 exit(0);
             }
 
-            commandlineInput.algorithm = algo;
+			// Find nearest power of two less than wgs
+			wgs = nearest_pow2(wgs);
             cIdx++;
         }
-        */
-        else if( memcmp(argument, "-s", 2)==0 )
-        {
+		else if( memcmp(argument, "-b", 2)==0 )
+		{
             if ( cIdx >= argc )
             {
-                printf("Missing step factor number after %s option\n", argument);
+                printf("Missing work group size after %s option\n", argument);
                 exit(0);
             }
 
-            step_factor = atoi(argv[cIdx]);
-            if (step_factor < -4 || step_factor > 8)
+            buckets_log2 = atoi(argv[cIdx]);
+            if (buckets_log2 < 12 || buckets_log2 > 26)
             {
-                printf("Step factor '%d' is invalid.  Valid algorithm values are between -4 and 8.\n", step_factor);
+                printf("Bucket quantity '%d' is invalid.  Valid values are between 12 and 26.\n", wgs);
                 exit(0);
             }
-            cIdx++;
-        }
+
+			cIdx++;
+		}
         else if( memcmp(argument, "-help", 6)==0 || memcmp(argument, "--help", 7)==0 )
         {
             xptMiner_printHelp();
@@ -636,6 +613,8 @@ void xptMiner_parseCommandline(int argc, char **argv)
         exit(0);
     }
 
+	commandlineInput.wgs = wgs;
+	commandlineInput.buckets_log2 = buckets_log2;
 }
 
 
@@ -698,6 +677,8 @@ int main(int argc, char** argv)
     uint32 mbTable[] = {512,256,128,32,8};
     //printf("Using %d megabytes of memory per thread\n", mbTable[min(commandlineInput.ptsMemoryMode,(sizeof(mbTable)/sizeof(mbTable[0])))]);
     printf("Using %d threads\n", commandlineInput.numThreads);
+	printf("Using %d work group size\n", commandlineInput.wgs);
+	printf("Using 2^%d buckets\n", commandlineInput.buckets_log2);
     printf("\n");
     
 #ifdef _WIN32

@@ -6,7 +6,11 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-#define MEASURE_TIME
+//#define LOCAL_ALGO
+//#define MEASURE_TIME
+//#define VERIFY_RESULTS
+
+extern commandlineInput_t commandlineInput;
 
 bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midHash, uint32 indexA, uint32 indexB)
 {
@@ -27,6 +31,14 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
 	sha512_update(&c512, tempHash, 32+4);
 	sha512_final(&c512, (unsigned char*)resultHash);
 	uint64 birthdayB = resultHash[indexB&7] >> (64ULL-SEARCH_SPACE_BITS);
+
+#ifdef VERIFY_RESULTS
+	printf("DEBUG:\n");
+	printf(" Nonce A = %#010x; Hash A = %#018llx\n", indexA, birthdayA);
+	printf(" Nonce B = %#010x; Hash B = %#018llx\n", indexB, birthdayB);
+	printf("\n");
+#endif
+
 	if( birthdayA != birthdayB )
 	{
 		return false; // invalid collision
@@ -110,14 +122,14 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	OpenCLMain &main = OpenCLMain::getInstance();
 	OpenCLDevice* device = main.getDevice(device_num);
 
-	this->max_wgs   = device->getMaxWorkGroupSize();
-    this->local_mem = device->getLocalMemSize();
-    this->sort_wgs  = 1;
+	if (commandlineInput.wgs == 0) {
+		this->wgs = device->getMaxWorkGroupSize();
+	} else {
+		this->wgs = commandlineInput.wgs;
+	}
 
-    // Determine maximum bitonic sort work group size (limited by max work group size and local memory)
-    while (sort_wgs <= max_wgs && sort_wgs * (sizeof(cl_ulong) + sizeof(cl_uint)) < local_mem) { sort_wgs <<= 1; }
-    sort_wgs >>= 1;
-    if (sort_wgs > 64) { sort_wgs = 64; }
+	this->buckets_log2 = commandlineInput.buckets_log2;
+
 
     printf("======================================================================\n");
 	printf("Device information for: %s\n", device->getName().c_str());
@@ -130,24 +142,25 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
 	std::stringstream params;
 	params << " -I ./opencl/";
-	params << " -D MAX_WGS=" << max_wgs;
+	params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
+	params << " -D LOCAL_WGS=" << wgs;
 	OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
-	kernel_hash = program->getKernel("hash_nonce");
-	kernel_sort = program->getKernel("bitonicSort");
-	kernel_seek = program->getKernel("seek_hits");
-
-
-	hashes = device->getContext()->createBuffer(MAX_MOMENTUM_NONCE * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
-	nonces = device->getContext()->createBuffer(MAX_MOMENTUM_NONCE * sizeof(cl_uint) , CL_MEM_READ_WRITE, NULL);
-
-	hash_temp  = device->getContext()->createBuffer(sort_wgs * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
-    nonce_temp = device->getContext()->createBuffer(sort_wgs * sizeof(cl_uint) , CL_MEM_READ_WRITE, NULL);
-    
-    nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
-    nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+	kernel_hash  = program->getKernel("hash_nonce");
+	kernel_reset = program->getKernel("reset_indexes");
 
 	mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
+
+	hash_list  = device->getContext()->createBuffer(MAX_MOMENTUM_NONCE * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
+#ifndef LOCAL_ALGO
+	index_list = device->getContext()->createBuffer((1 << buckets_log2) * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+#endif
+
+    nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+    nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+	nonce_qty = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+
+	overflow_qty = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 
 	q = device->getContext()->createCommandQueue(device);
 }
@@ -172,74 +185,74 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	sha256_final(&c256, midHash);
 
 #ifdef MEASURE_TIME
-	printf("Starting...\n");
+	printf("Hashing...\n");
 	uint32 begin = getTimeMilliseconds();
-    uint32 end_hashing, end_sorting, end_seeking;
 #endif
 
-    // Calculate all hashes
-    kernel_hash->resetArgs();
-    kernel_hash->addGlobalArg(mid_hash);
-    kernel_hash->addGlobalArg(hashes);
-    kernel_hash->addGlobalArg(nonces);
+	cl_uint result_qty = 0;
+	cl_uint result_a[256];
+	cl_uint result_b[256];
+	cl_uint total_work = (MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH);
 
-	q->enqueueWriteBuffer(mid_hash, midHash, 32*sizeof(cl_uint));
+	// Calculate all hashes
+	kernel_hash->resetArgs();
 
-	q->enqueueKernel1D(kernel_hash, MAX_MOMENTUM_NONCE, max_wgs);
-
-#ifdef MEASURE_TIME
-	q->finish();
-	printf("Survived hashing...\n");
-	end_hashing = getTimeMilliseconds();
+	kernel_hash->addGlobalArg(mid_hash);
+	kernel_hash->addGlobalArg(hash_list);
+#ifndef LOCAL_ALGO
+	kernel_hash->addGlobalArg(index_list);
+#else
+	kernel_hash->addLocalArg(BIRTHDAYS_PER_HASH * wgs * sizeof(cl_ulong));
+	kernel_hash->addLocalArg(BIRTHDAYS_PER_HASH * wgs * sizeof(cl_uint));
 #endif
+	kernel_hash->addGlobalArg(nonce_a);
+	kernel_hash->addGlobalArg(nonce_b);
+	kernel_hash->addGlobalArg(nonce_qty);
 
-    // Sort all hashes
-    kernel_sort->resetArgs();
-    kernel_sort->addGlobalArg(hashes);
-    kernel_sort->addGlobalArg(nonces);
-    kernel_sort->addGlobalArg(hash_temp);
-    kernel_sort->addGlobalArg(nonce_temp);
-
-    q->enqueueKernel1D(kernel_sort, MAX_MOMENTUM_NONCE, sort_wgs);
-
-#ifdef MEASURE_TIME
-	q->finish();
-	printf("Survived sorting...\n");
-	end_sorting = getTimeMilliseconds();
-#endif
-
-	// Extract the results
-    uint32 result_qty = 0;
-    uint32 result_a[256];
-    uint32 result_b[256];
-
-	kernel_seek->resetArgs();
-    kernel_seek->addGlobalArg(hashes);
-    kernel_seek->addGlobalArg(nonces);
-    kernel_seek->addGlobalArg(nonce_a);
-    kernel_seek->addGlobalArg(nonce_b);
-    kernel_seek->addGlobalArg(nonce_qty);
-
+	q->enqueueWriteBuffer(mid_hash, midHash, 32 * sizeof(cl_uint));
 	q->enqueueWriteBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 
-	q->enqueueKernel1D(kernel_seek, MAX_MOMENTUM_NONCE, max_wgs);
+	q->enqueueKernel1D(kernel_hash, total_work, wgs);
 
 	q->enqueueReadBuffer(nonce_a,   result_a,    sizeof(cl_uint) * 256);
-    q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
+	q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
 	q->enqueueReadBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
+
 	q->finish();
 
+#ifdef MEASURE_TIME
+	uint32 hash_end = getTimeMilliseconds();
+	printf("Hashing complete...\n");
+#endif
+
 	for (int i = 0; i < result_qty; i++) {
-		protoshares_revalidateCollision(block, midHash, result_a[i], result_a[i]);
+		protoshares_revalidateCollision(block, midHash, result_a[i], result_b[i]);
 	}
+
+
+	// Reset index list, get overflow count
+	cl_uint overflow_res = 0;
+	kernel_reset->resetArgs();
+#ifndef LOCAL_ALGO
+    kernel_reset->addGlobalArg(index_list);
+#else
+	kernel_reset->addGlobalArg(hash_list);
+#endif
+    kernel_reset->addGlobalArg(overflow_qty);
+
+	q->enqueueWriteBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
+
+	q->enqueueKernel1D(kernel_reset, (1 << buckets_log2), wgs);
+
+	q->enqueueReadBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
+	q->finish();
 
 #ifdef MEASURE_TIME
 	uint32 end = getTimeMilliseconds();
-    uint32 total_time = (end - begin);
-    uint32 hash_time = (end_hashing - begin);
-    uint32 sort_time = (end_sorting - end_hashing);
-
-	printf("Elapsed time: %d ms (Hash = %d, Sort = %d, Seek = %d)\n", (end-begin), (end_hashing-begin), (end_sorting-end_hashing), (end-end_sorting));
+	printf("Found %d hits, dropped %d items (%.2f%%)\n", result_qty, overflow_res, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
+	printf("Elapsed time: %d ms\n", (end-begin));
 #endif
 
+	totalTableCount++;
+	totalOverflowPct += (double)overflow_res / (double)MAX_MOMENTUM_NONCE;
 }

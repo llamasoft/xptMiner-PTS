@@ -185,6 +185,27 @@ typedef struct
 	uint8	targetShare[32];
 }minerMetiscoinBlock_t; // identical to scryptBlock
 
+typedef struct  
+{
+    char* workername;
+    char* workerpass;
+    char* host;
+    sint32 port;
+    sint32 numThreads;
+    uint32 ptsMemoryMode;
+    // GPU / OpenCL options
+    uint32 deviceNum;
+    bool listDevices;
+    std::vector<int> deviceList;
+
+    // mode option
+    uint32 mode;
+    float donationPercent;
+
+	uint32 wgs;
+	uint32 buckets_log2;
+} commandlineInput_t;
+
 #include"scrypt.h"
 #include"algorithm.h"
 
@@ -195,6 +216,8 @@ void xptMiner_submitShare(minerMetiscoinBlock_t* block);
 
 // stats
 extern volatile uint32 totalCollisionCount;
+extern volatile uint32 totalTableCount;
+extern volatile double totalOverflowPct;
 extern volatile uint32 totalShareCount;
 extern volatile uint32 invalidShareCount;
 extern volatile uint32 monitorCurrentBlockHeight;

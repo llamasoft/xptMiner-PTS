@@ -10,23 +10,20 @@ public:
 
 private:
 	int device_num;
-	uint32 max_wgs;
-    uint32 sort_wgs;
-    uint32 local_mem;
+	uint32 wgs;
+	uint32 buckets_log2;
 
 	OpenCLKernel* kernel_hash;
-	OpenCLKernel* kernel_sort;
-	OpenCLKernel* kernel_seek;
+	OpenCLKernel* kernel_reset;
 	
 	OpenCLBuffer* mid_hash;
-    OpenCLBuffer* hashes;
-    OpenCLBuffer* nonces;
-    OpenCLBuffer* hash_temp;
-    OpenCLBuffer* nonce_temp;
+    OpenCLBuffer* hash_list;
+	OpenCLBuffer* index_list;
 
     OpenCLBuffer* nonce_a;
     OpenCLBuffer* nonce_b;
     OpenCLBuffer* nonce_qty;
+	OpenCLBuffer* overflow_qty;
 
     OpenCLCommandQueue * q;
 };
