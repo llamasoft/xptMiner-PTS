@@ -6,7 +6,6 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-#define LOCAL_ALGO
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 
@@ -139,6 +138,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	}
 
 	this->buckets_log2 = commandlineInput.buckets_log2;
+    this->bucket_size = commandlineInput.bucket_size;
 
 
     printf("======================================================================\n");
@@ -153,6 +153,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	std::stringstream params;
 	params << " -I ./opencl/";
 	params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
+    params << " -D BUCKET_SIZE=" << bucket_size;
 	params << " -D LOCAL_WGS=" << wgs;
 	OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
@@ -161,16 +162,14 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
 	mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
 
-	hash_list  = device->getContext()->createBuffer(MAX_MOMENTUM_NONCE * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
-#ifndef LOCAL_ALGO
+	hash_list  = device->getContext()->createBuffer((1 << buckets_log2) * bucket_size * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
 	index_list = device->getContext()->createBuffer((1 << buckets_log2) * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
-#endif
 
     nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
     nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 	nonce_qty = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 
-	overflow_qty = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+	overflow_ct = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 
 	q = device->getContext()->createCommandQueue(device);
 }
@@ -211,7 +210,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 
 #ifdef MEASURE_TIME
-	printf("Hashing...\n");
+	// printf("Hashing...\n");
 	uint32 begin = getTimeMilliseconds();
 #endif
 
@@ -225,12 +224,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 	kernel_hash->addGlobalArg(mid_hash);
 	kernel_hash->addGlobalArg(hash_list);
-#ifndef LOCAL_ALGO
 	kernel_hash->addGlobalArg(index_list);
-#else
-	kernel_hash->addLocalArg(BIRTHDAYS_PER_HASH * wgs * sizeof(cl_ulong));
-	kernel_hash->addLocalArg(BIRTHDAYS_PER_HASH * wgs * sizeof(cl_uint));
-#endif
 	kernel_hash->addGlobalArg(nonce_a);
 	kernel_hash->addGlobalArg(nonce_b);
 	kernel_hash->addGlobalArg(nonce_qty);
@@ -248,39 +242,30 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 #ifdef MEASURE_TIME
 	uint32 hash_end = getTimeMilliseconds();
-	printf("Hashing complete...\n");
+	// printf("Resetting...\n");
 #endif
 
 	for (int i = 0; i < result_qty; i++) {
 		protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
 	}
 
-
 	// Reset index list, get overflow count
 	cl_uint overflow_res = 0;
 	kernel_reset->resetArgs();
-#ifndef LOCAL_ALGO
     kernel_reset->addGlobalArg(index_list);
-#else
-	kernel_reset->addGlobalArg(hash_list);
-#endif
-    kernel_reset->addGlobalArg(overflow_qty);
+    kernel_reset->addGlobalArg(overflow_ct);
 
-	q->enqueueWriteBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
+	q->enqueueWriteBuffer(overflow_ct, &overflow_res, sizeof(cl_uint));
 
-#ifndef LOCAL_ALGO
 	q->enqueueKernel1D(kernel_reset, (1 << buckets_log2), wgs);
-#else
-    q->enqueueKernel1D(kernel_reset, MAX_MOMENTUM_NONCE, wgs);
-#endif
 
-	q->enqueueReadBuffer(overflow_qty, &overflow_res, sizeof(cl_uint));
+	q->enqueueReadBuffer(overflow_ct, &overflow_res, sizeof(cl_uint));
 	q->finish();
 
 #ifdef MEASURE_TIME
 	uint32 end = getTimeMilliseconds();
-	printf("Found %d hits, dropped %d items (%.2f%%)\n", result_qty, overflow_res, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
-	printf("Elapsed time: %d ms\n", (end-begin));
+	printf("Found %d collisions, dropped %d items (%.2f%%)\n", result_qty, overflow_res, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
+	printf("Elapsed time: %d ms (Hash: %d ms, Reset: %d ms)\n", (end-begin), (hash_end-begin), (end-hash_end));
 #endif
 
 	totalTableCount++;

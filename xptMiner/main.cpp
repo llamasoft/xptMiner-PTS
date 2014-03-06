@@ -444,10 +444,17 @@ void xptMiner_printHelp()
     puts("   -p                   The password used for login");
     puts("   -t <num>             The number of threads for mining (default is 1)");
     puts("   -f <num>             Donation amount for dev (default donates 3.0% to dev)");
+    puts("");
+    puts("GPU options:");
+    puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
 	puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
 	puts("   -b <num>			  Number of buckets to use in hashing step");
-	puts("                        Uses 2^N buckets (range = 12 to 25, default is 12)");
-    puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
+	puts("                        Uses 2^N buckets (range = 12 to 26, default is 23)");
+    puts("   -s <num>             Size of buckets to use (0 = auto, default is 0)");
+    puts("                        \"auto\" is defined as 2^26 / buckets (aka \"-s\")");
+    puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
+    puts("                        (Leave unset if using \"-s\" option)");
+
     puts("Example usage:");
     puts("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0");
 }
@@ -459,7 +466,9 @@ void xptMiner_parseCommandline(int argc, char **argv)
     // Default values
     commandlineInput.donationPercent = 3.0f;
 	uint32 wgs = 0;
-	uint32 buckets_log2 = 12;
+	uint32 buckets_log2 = 23;
+    uint32 bucket_size = 0;
+    uint64 target_mem = 0;
 
     while( cIdx < argc )
     {
@@ -596,6 +605,29 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
 			cIdx++;
 		}
+		else if( memcmp(argument, "-s", 2)==0 )
+		{
+            if ( cIdx >= argc )
+            {
+                printf("Missing bucket size after %s option\n", argument);
+                exit(0);
+            }
+
+            bucket_size = atoi(argv[cIdx]);
+			cIdx++;
+		}
+        else if( memcmp(argument, "-m", 2)==0 )
+		{
+            if ( cIdx >= argc )
+            {
+                printf("Missing target memory size after %s option\n", argument);
+                exit(0);
+            }
+
+            // -1 to ensure our calculation requires LESS THAN the specified amount
+            target_mem = atoi(argv[cIdx]);
+			cIdx++;
+		}
         else if( memcmp(argument, "-help", 6)==0 || memcmp(argument, "--help", 7)==0 )
         {
             xptMiner_printHelp();
@@ -615,6 +647,34 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
 	commandlineInput.wgs = wgs;
 	commandlineInput.buckets_log2 = buckets_log2;
+
+    if (bucket_size == 0) {
+        bucket_size = 1 << (26 - buckets_log2);
+    }
+    commandlineInput.bucket_size = bucket_size;
+
+    // If set, convert target memory into a usable value for bucket_size
+    if (target_mem > 0) {
+        target_mem = target_mem * 1024 * 1024; // Convert to bytes
+        target_mem = target_mem - 1; // Guarantee results are LESS THAN the specified amount
+
+        // Determine the maximum usable bucket_size by solving the following for bucket_size:
+        //   MEM = (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size)
+        //       + (sizeof(cl_uint)  * (1 << buckets_log2))
+        // We use sizeof(cl_ulong) = 8, sizeof(cl_uint) = 4.  This allows us to factor:
+        //   MEM = (4 * (1 << buckets_log2)) * (2 * bucket_size + 1)
+        bucket_size = ((target_mem / (4 * (1 << buckets_log2))) - 1) / 2;
+
+        // Make sure the parameter configuration is sane:
+        if (bucket_size < 1) {
+            target_mem = (target_mem + 1) / 1024 / 1024; // Undo our butchering
+            printf("ERROR: Memory target of %d MB cannot be attained with 2^%d buckets!\n", target_mem, buckets_log2);
+            printf("       Please consider lowering the value of \"-b\".\n");
+            exit(0);
+        }
+
+        commandlineInput.bucket_size = bucket_size;
+    }
 }
 
 
@@ -679,6 +739,14 @@ int main(int argc, char** argv)
     printf("Using %d threads\n", commandlineInput.numThreads);
 	printf("Using %d work group size\n", commandlineInput.wgs);
 	printf("Using 2^%d buckets\n", commandlineInput.buckets_log2);
+    printf("Using %d elements per bucket\n", commandlineInput.bucket_size);
+    printf("\n");
+
+    uint64 total_mem = sizeof(cl_ulong) * (1 << commandlineInput.buckets_log2) * commandlineInput.bucket_size;
+    total_mem += sizeof(cl_uint) * (1 << commandlineInput.buckets_log2);
+    total_mem /= 1024; // Convert to KB
+    total_mem /= 1024; // Convert to MB
+    printf("Total memory required: %d MB\n", total_mem);
     printf("\n");
     
 #ifdef _WIN32

@@ -204,6 +204,7 @@ typedef struct
 
 	uint32 wgs;
 	uint32 buckets_log2;
+    uint32 bucket_size;
 } commandlineInput_t;
 
 #include"scrypt.h"
