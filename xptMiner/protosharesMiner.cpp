@@ -193,7 +193,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
 	kernel_hash  = program->getKernel("hash_nonce");
-	kernel_reset = program->getKernel("reset_indexes");
+	kernel_reset = program->getKernel("reset_and_seek");
 
 	mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
 
@@ -253,9 +253,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	uint32 begin = getTimeMilliseconds();
 #endif
 
-	cl_uint result_qty = 0;
-	cl_uint result_a[256];
-	cl_uint result_b[256];
+
 	cl_uint total_work = (MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH);
 
 	// Calculate all hashes
@@ -264,18 +262,12 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	kernel_hash->addGlobalArg(mid_hash);
 	kernel_hash->addGlobalArg(hash_list);
 	kernel_hash->addGlobalArg(index_list);
-	kernel_hash->addGlobalArg(nonce_a);
-	kernel_hash->addGlobalArg(nonce_b);
-	kernel_hash->addGlobalArg(nonce_qty);
+
 
     q->enqueueWriteBuffer(mid_hash, hash_state.b32, 32 * sizeof(cl_uint));
-	q->enqueueWriteBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
+
 
 	q->enqueueKernel1D(kernel_hash, total_work, wgs);
-
-	q->enqueueReadBuffer(nonce_a,   result_a,    sizeof(cl_uint) * 256);
-	q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
-	q->enqueueReadBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 
 	q->finish();
 
@@ -284,26 +276,38 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	// printf("Resetting...\n");
 #endif
 
-	for (int i = 0; i < result_qty; i++) {
-		protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
-	}
-
 	// Reset index list, get overflow count
 	cl_uint overflow_res = 0;
+    cl_uint result_qty = 0;
+	cl_uint result_a[256];
+	cl_uint result_b[256];
+
 	kernel_reset->resetArgs();
+    kernel_reset->addGlobalArg(hash_list);
     kernel_reset->addGlobalArg(index_list);
     kernel_reset->addGlobalArg(overflow_ct);
+	kernel_reset->addGlobalArg(nonce_a);
+	kernel_reset->addGlobalArg(nonce_b);
+	kernel_reset->addGlobalArg(nonce_qty);
 
 	q->enqueueWriteBuffer(overflow_ct, &overflow_res, sizeof(cl_uint));
+    q->enqueueWriteBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 
 	q->enqueueKernel1D(kernel_reset, (1 << buckets_log2), wgs);
 
 	q->enqueueReadBuffer(overflow_ct, &overflow_res, sizeof(cl_uint));
+	q->enqueueReadBuffer(nonce_a,   result_a,    sizeof(cl_uint) * 256);
+	q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
+	q->enqueueReadBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 	q->finish();
+
+	for (int i = 0; i < result_qty; i++) {
+		protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
+	}
 
 #ifdef MEASURE_TIME
 	uint32 end = getTimeMilliseconds();
-	printf("Found %d collisions, dropped %d items (%.2f%%)\n", result_qty, overflow_res, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
+	printf("Found %d collisions, dropped %d items (%.2f%%)\n", result_qty * 2, overflow_res, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
 	printf("Elapsed time: %d ms (Hash: %d ms, Reset: %d ms)\n", (end-begin), (hash_end-begin), (end-hash_end));
 #endif
 
