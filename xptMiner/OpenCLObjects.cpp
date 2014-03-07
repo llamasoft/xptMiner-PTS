@@ -214,6 +214,9 @@ void OpenCLDevice::dumpDeviceInfo() {
     check_error(clGetDeviceInfo(my_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &ulong_rtn, NULL));
     printf("%-35s %9lu kb\n", "CL_DEVICE_GLOBAL_MEM_SIZE:", ulong_rtn / 1024);
 
+	check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &ulong_rtn, NULL));
+    printf("%-35s %9lu kb\n", "CL_DEVICE_MAX_MEM_ALLOC_SIZE:", ulong_rtn / 1024);
+
     check_error(clGetDeviceInfo(my_id, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(cl_ulong), &ulong_rtn, NULL));
     printf("%-35s %9lu kb\n", "CL_DEVICE_GLOBAL_MEM_CACHE_SIZE:", ulong_rtn / 1024);
 
@@ -250,25 +253,31 @@ std::string OpenCLDevice::getName() {
     return rtn;
 }
 
-long OpenCLDevice::getMaxWorkGroupSize() {
+unsigned long OpenCLDevice::getMaxWorkGroupSize() {
 	cl_ulong value;
 	check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_WORK_GROUP_SIZE, (sizeof(cl_ulong)), &value, NULL));
 	return value;
 }
 
-long OpenCLDevice::getMaxMemAllocSize() {
+unsigned long OpenCLDevice::getMaxMemAllocSize() {
 	cl_ulong value;
 	check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, (sizeof(cl_ulong)), &value, NULL));
 	return value;
 }
 
-long OpenCLDevice::getLocalMemSize() {
+unsigned long OpenCLDevice::getLocalMemSize() {
 	cl_ulong value;
 	check_error(clGetDeviceInfo(my_id, CL_DEVICE_LOCAL_MEM_SIZE, (sizeof(cl_ulong)), &value, NULL));
 	return value;
 }
 
-long OpenCLDevice::getMaxParamSize() {
+unsigned long OpenCLDevice::getGlobalMemSize() {
+	cl_ulong value;
+	check_error(clGetDeviceInfo(my_id, CL_DEVICE_GLOBAL_MEM_SIZE, (sizeof(cl_ulong)), &value, NULL));
+	return value;
+}
+
+unsigned long OpenCLDevice::getMaxParamSize() {
 	cl_ulong value;
 	check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_PARAMETER_SIZE, (sizeof(cl_ulong)), &value, NULL));
 	return value;

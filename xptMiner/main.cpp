@@ -737,16 +737,6 @@ int main(int argc, char** argv)
     uint32 mbTable[] = {512,256,128,32,8};
     //printf("Using %d megabytes of memory per thread\n", mbTable[min(commandlineInput.ptsMemoryMode,(sizeof(mbTable)/sizeof(mbTable[0])))]);
     printf("Using %d threads\n", commandlineInput.numThreads);
-	printf("Using %d work group size\n", commandlineInput.wgs);
-	printf("Using 2^%d buckets\n", commandlineInput.buckets_log2);
-    printf("Using %d elements per bucket\n", commandlineInput.bucket_size);
-    printf("\n");
-
-    uint64 total_mem = sizeof(cl_ulong) * (1 << commandlineInput.buckets_log2) * commandlineInput.bucket_size;
-    total_mem += sizeof(cl_uint) * (1 << commandlineInput.buckets_log2);
-    total_mem /= 1024; // Convert to KB
-    total_mem /= 1024; // Convert to MB
-    printf("Total memory required: %d MB\n", total_mem);
     printf("\n");
     
 #ifdef _WIN32

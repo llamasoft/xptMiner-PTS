@@ -131,6 +131,14 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	OpenCLMain &main = OpenCLMain::getInstance();
 	OpenCLDevice* device = main.getDevice(device_num);
 
+
+    printf("======================================================================\n");
+	printf("Device information for: %s\n", device->getName().c_str());
+    device->dumpDeviceInfo(); // Makes troubleshooting easier
+    printf("======================================================================\n");
+    printf("\n");
+
+	// Sanitize input parameters
 	if (commandlineInput.wgs == 0) {
 		this->wgs = device->getMaxWorkGroupSize();
 	} else {
@@ -140,12 +148,39 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	this->buckets_log2 = commandlineInput.buckets_log2;
     this->bucket_size = commandlineInput.bucket_size;
 
+	printf("Using %d work group size\n", wgs);
+	printf("Using 2^%d buckets\n", buckets_log2);
 
-    printf("======================================================================\n");
-	printf("Device information for: %s\n", device->getName().c_str());
-    device->dumpDeviceInfo(); // Makes troubleshooting easier
-    printf("======================================================================\n");
-    printf("\n");
+	// Make sure we can allocate hash_list (cannot violate CL_DEVICE_MAX_MEM_ALLOC_SIZE)
+	if (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) {
+		while (bucket_size > 0 && sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) { bucket_size--; }
+		if (bucket_size == 0) {
+			printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
+			printf("       Please lower the value of \"-b\".\n");
+			exit(0);
+		}
+		printf("Using %d elements per bucket (limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE)\n", bucket_size);
+
+	} else {
+		printf("Using %d elements per bucket\n", bucket_size);
+	}
+
+	// Make sure the whole thing fits in memory
+	uint32 required_mem = sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size;
+	required_mem += sizeof(cl_uint) * (1 << buckets_log2);
+	if (required_mem > device->getGlobalMemSize()) {
+		printf("ERROR: Device %d cannot store 2^%d buckets of %d elements!\n", device_num, buckets_log2, bucket_size);
+		printf("       You require %d MB of memory but only have %d MB available.\n",
+			required_mem / 1024 / 1024,
+			device->getGlobalMemSize() / 1024 / 1024);
+		printf("       Consider setting a target memory usage with \"-m\".\n");
+		exit(0);
+	}
+	printf("Using %d MB of memory\n", required_mem / 1024 / 1024);
+	printf("\n");
+
+
+	// Compile the OpenCL code
 	printf("Compiling OpenCL code... this may take 3-5 minutes\n");
 	std::vector<std::string> file_list;
 	file_list.push_back("opencl/momentum.cl");
@@ -172,6 +207,10 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	overflow_ct = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 
 	q = device->getContext()->createCommandQueue(device);
+
+
+	printf("Hash Kernel Pref WGS: %d\n", kernel_hash->getPreferredWorkGroupSize(device));
+	printf("Reset Kernel Pref WGS: %d\n", kernel_reset->getPreferredWorkGroupSize(device));
 }
 
 

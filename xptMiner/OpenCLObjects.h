@@ -100,10 +100,11 @@ public:
 	virtual ~OpenCLDevice();
     void dumpDeviceInfo();
 	std::string getName();
-	long getMaxWorkGroupSize();
-	long getMaxMemAllocSize();
-	long getLocalMemSize();
-	long getMaxParamSize();
+	unsigned long getMaxWorkGroupSize();
+	unsigned long getMaxMemAllocSize();
+	unsigned long getMaxParamSize();
+	unsigned long getLocalMemSize();
+	unsigned long getGlobalMemSize();
 	int getMaxWorkItemDimensions();
 	std::vector<long> getMaxWorkItemSizes();
 	cl_device_id getDeviceId();
