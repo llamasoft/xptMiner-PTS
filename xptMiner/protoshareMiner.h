@@ -13,6 +13,7 @@ private:
 	uint32 wgs;
 	uint32 buckets_log2;
     uint32 bucket_size;
+	uint32 target_mem;
 
 	OpenCLKernel* kernel_hash;
 	OpenCLKernel* kernel_reset;
@@ -24,7 +25,6 @@ private:
     OpenCLBuffer* nonce_a;
     OpenCLBuffer* nonce_b;
     OpenCLBuffer* nonce_qty;
-	OpenCLBuffer* overflow_ct;
 
     OpenCLCommandQueue * q;
 };

@@ -347,8 +347,8 @@ void xptMiner_xptQueryWorkLoop()
                   if( passedSeconds > 5 ) {
                       speedRate = (double)totalCollisionCount / (double)passedSeconds * 60.0;
 					  tableRate = (double)totalTableCount / (double)passedSeconds * 60;
-					  printf("collisions/min: %.2lf, tables/min: %.2lf, drop rate %.2f%%; Shares total: %ld (Valid: %ld, Invalid: %ld",
-						speedRate, tableRate, 100.0 * totalOverflowPct / totalTableCount, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+					  printf("collisions/min: %.2lf, tables/min: %.2lf, e=%.3f; Shares total: %ld (Valid: %ld, Invalid: %ld",
+						speedRate, tableRate, 1.0 / sqrt((double)totalTableCount), totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
 				  }
 
 				  if ( passedSeconds > 600 ) {
@@ -450,8 +450,7 @@ void xptMiner_printHelp()
 	puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
 	puts("   -b <num>			  Number of buckets to use in hashing step");
 	puts("                        Uses 2^N buckets (range = 12 to 26, default is 23)");
-    puts("   -s <num>             Size of buckets to use (0 = auto, default is 0)");
-    puts("                        \"auto\" is defined as 2^26 / buckets (aka \"-s\")");
+    puts("   -s <num>             Size of buckets to use (0 = MAX, default is 0)");
     puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
     puts("                        (Leave unset if using \"-s\" option)");
 
@@ -468,7 +467,7 @@ void xptMiner_parseCommandline(int argc, char **argv)
 	uint32 wgs = 0;
 	uint32 buckets_log2 = 23;
     uint32 bucket_size = 0;
-    uint64 target_mem = 0;
+    uint32 target_mem = 0;
 
     while( cIdx < argc )
     {
@@ -647,34 +646,8 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
 	commandlineInput.wgs = wgs;
 	commandlineInput.buckets_log2 = buckets_log2;
-
-    if (bucket_size == 0) {
-        bucket_size = 1 << (26 - buckets_log2);
-    }
     commandlineInput.bucket_size = bucket_size;
-
-    // If set, convert target memory into a usable value for bucket_size
-    if (target_mem > 0) {
-        target_mem = target_mem * 1024 * 1024; // Convert to bytes
-        target_mem = target_mem - 1; // Guarantee results are LESS THAN the specified amount
-
-        // Determine the maximum usable bucket_size by solving the following for bucket_size:
-        //   MEM = (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size)
-        //       + (sizeof(cl_uint)  * (1 << buckets_log2))
-        // We use sizeof(cl_ulong) = 8, sizeof(cl_uint) = 4.  This allows us to factor:
-        //   MEM = (4 * (1 << buckets_log2)) * (2 * bucket_size + 1)
-        bucket_size = ((target_mem / (4 * (1 << buckets_log2))) - 1) / 2;
-
-        // Make sure the parameter configuration is sane:
-        if (bucket_size < 1) {
-            target_mem = (target_mem + 1) / 1024 / 1024; // Undo our butchering
-            printf("ERROR: Memory target of %d MB cannot be attained with 2^%d buckets!\n", target_mem, buckets_log2);
-            printf("       Please consider lowering the value of \"-b\".\n");
-            exit(0);
-        }
-
-        commandlineInput.bucket_size = bucket_size;
-    }
+	commandlineInput.target_mem = target_mem;
 }
 
 

@@ -219,7 +219,6 @@ void xptMiner_submitShare(minerMetiscoinBlock_t* block);
 // stats
 extern volatile uint32 totalCollisionCount;
 extern volatile uint32 totalTableCount;
-extern volatile double totalOverflowPct;
 extern volatile uint32 totalShareCount;
 extern volatile uint32 invalidShareCount;
 extern volatile uint32 monitorCurrentBlockHeight;
