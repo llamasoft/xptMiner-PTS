@@ -24,11 +24,13 @@
 extern commandlineInput_t commandlineInput;
 
 double estimate_drops(double ratio, uint32 size) {
+	srand(0); // Ensure same results each time
+
     uint32 scale = (32*1024 < RAND_MAX ? 32*1024 : RAND_MAX);
     uint32 *buckets = new uint32[scale];
     uint32 total_items = ratio * scale;
 
-    uint32 trials = 10;
+    uint32 trials = 25;
     uint32 drops = 0;
 
     for (uint32 sim = 0; sim < trials; sim++)
@@ -47,6 +49,7 @@ double estimate_drops(double ratio, uint32 size) {
     }
 
     delete[] buckets;
+	srand(getTimeMilliseconds());
     return ((double)drops / (double)total_items / (double)trials);
 }
 
