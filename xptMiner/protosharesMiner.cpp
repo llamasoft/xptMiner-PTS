@@ -8,6 +8,7 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
+#define BUCKET_THRESHOLD        20
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 
@@ -173,6 +174,8 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	this->buckets_log2 = commandlineInput.buckets_log2;
     this->bucket_size = commandlineInput.bucket_size;
 	this->target_mem = commandlineInput.target_mem;
+    this->force_local = commandlineInput.force_local;
+
 	printf("Using %d work group size\n", wgs);
 	printf("Using 2^%d buckets\n", buckets_log2);
 
@@ -263,6 +266,8 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 	params << " -I ./opencl/";
 	params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
     params << " -D BUCKET_SIZE=" << bucket_size;
+    params << " -D BUCKET_THRESHOLD=" << BUCKET_THRESHOLD;
+    params << " -D FORCE_LOCAL=" << (force_local ? 1 : 0);
 	params << " -D LOCAL_WGS=" << wgs;
 	OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
@@ -352,7 +357,9 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	kernel_reset->resetArgs();
     kernel_reset->addGlobalArg(hash_list);
     kernel_reset->addGlobalArg(index_list);
-    kernel_reset->addLocalArg(sizeof(cl_ulong) * wgs * bucket_size);
+    if (force_local || bucket_size > BUCKET_THRESHOLD) {
+        kernel_reset->addLocalArg(sizeof(cl_ulong) * wgs * bucket_size);
+    }
 	kernel_reset->addGlobalArg(nonce_a);
 	kernel_reset->addGlobalArg(nonce_b);
 	kernel_reset->addGlobalArg(nonce_qty);

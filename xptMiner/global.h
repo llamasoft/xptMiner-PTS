@@ -206,6 +206,7 @@ typedef struct
 	uint32 buckets_log2;
     uint32 bucket_size;
 	uint32 target_mem;
+    bool   force_local;
 } commandlineInput_t;
 
 #include"scrypt.h"

@@ -448,12 +448,14 @@ void xptMiner_printHelp()
     puts("GPU options:");
     puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
 	puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
-	puts("   -b <num>			  Number of buckets to use in hashing step");
+	puts("   -b <num>             Number of buckets to use in hashing step");
 	puts("                        Uses 2^N buckets (range = 12 to 26, default is 23)");
     puts("   -s <num>             Size of buckets to use (0 = MAX, default is 0)");
     puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
     puts("                        (Leave unset if using \"-s\" option)");
-
+    puts("   -local <bool>        Force using local memory even if data fits in private memory");
+    puts("                        (values: 0 = No, 1 = Yes; default is 0)");
+    puts("");
     puts("Example usage:");
     puts("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0");
 }
@@ -468,6 +470,7 @@ void xptMiner_parseCommandline(int argc, char **argv)
 	uint32 buckets_log2 = 23;
     uint32 bucket_size = 0;
     uint32 target_mem = 0;
+    bool   force_local = false;
 
     while( cIdx < argc )
     {
@@ -623,10 +626,20 @@ void xptMiner_parseCommandline(int argc, char **argv)
                 exit(0);
             }
 
-            // -1 to ensure our calculation requires LESS THAN the specified amount
             target_mem = atoi(argv[cIdx]);
 			cIdx++;
 		}
+        else if( memcmp(argument, "-local", 6)==0 || memcmp(argument, "-l", 2)==0 )
+        {
+            if ( cIdx >= argc )
+            {
+                printf("Missing boolean flag after %s option\n", argument);
+                exit(0);
+            }
+
+            force_local = atoi(argv[cIdx]);
+			cIdx++;
+        }
         else if( memcmp(argument, "-help", 6)==0 || memcmp(argument, "--help", 7)==0 )
         {
             xptMiner_printHelp();
@@ -648,6 +661,7 @@ void xptMiner_parseCommandline(int argc, char **argv)
 	commandlineInput.buckets_log2 = buckets_log2;
     commandlineInput.bucket_size = bucket_size;
 	commandlineInput.target_mem = target_mem;
+    commandlineInput.force_local = force_local;
 }
 
 
