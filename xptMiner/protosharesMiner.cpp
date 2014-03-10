@@ -23,34 +23,26 @@
 
 extern commandlineInput_t commandlineInput;
 
-double estimate_drops(double ratio, uint32 size) {
-	srand(0); // Ensure same results each time
+double factorial(uint32_t n) {
+    if (n == 0) { return 1; }
+    double rtn = n;
+    while (--n > 0) { rtn *= n; }
 
-    uint32 scale = (32*1024 < RAND_MAX ? 32*1024 : RAND_MAX);
-    uint32 *buckets = new uint32[scale];
-    uint32 total_items = ratio * scale;
+    return rtn;
+}
 
-    uint32 trials = 25;
-    uint32 drops = 0;
+double poisson_estimate(double buckets, double items, double bucket_size) {
+    double total_drops = 0;
+    double f = factorial(bucket_size);
 
-    for (uint32 sim = 0; sim < trials; sim++)
-    {
-        for (uint32 i = 0; i < scale; i++) { buckets[i] = 0; }
+    for (uint32_t i = bucket_size + 1; i < bucket_size + 10; i++) {
+        f *= i;
 
-        for (uint32 i = 0; i < total_items; i++) {
-            buckets[rand() % scale]++;
-        }
-
-        for (uint32 i = 0; i < scale; i++) {
-            if (buckets[i] > size) {
-                drops += (buckets[i] - size);
-            }
-        }
+        total_drops += (buckets * (i - bucket_size) * pow(items / buckets, (double)i))
+                     / (exp(items / buckets) * f);
     }
 
-    delete[] buckets;
-	srand(getTimeMilliseconds());
-    return ((double)drops / (double)total_items / (double)trials);
+    return (total_drops / items);
 }
 
 bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midHash, uint32 indexA, uint32 indexB)
@@ -243,7 +235,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 		exit(0);
 	}
 	printf("Using %d MB of memory\n", required_mem / 1024 / 1024);
-	printf("Estimated drop percentage: %5.2f%%\n", 100 * estimate_drops(pow(2.0, (int)(26 - buckets_log2)), bucket_size));
+	printf("Estimated drop percentage: %5.2f%%\n", 100 * poisson_estimate((1 << buckets_log2), MAX_MOMENTUM_NONCE, bucket_size));
 	printf("\n");
 
 
