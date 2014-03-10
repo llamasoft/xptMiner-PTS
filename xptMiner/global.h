@@ -79,11 +79,11 @@ typedef struct sockaddr SOCKADDR;
 // connection info for xpt
 typedef struct  
 {
-	char* ip;
-	uint16 port;
-	char* authUser;
-	char* authPass;
-	float donationPercent;
+    char* ip;
+    uint16 port;
+    char* authUser;
+    char* authPass;
+    float donationPercent;
 }generalRequestTarget_t;
 
 #include"xptServer.h"
@@ -99,9 +99,9 @@ typedef struct
 // global settings for miner
 typedef struct  
 {
-	generalRequestTarget_t requestTarget;
-	uint32 protoshareMemoryMode;
-	float donationPercent;
+    generalRequestTarget_t requestTarget;
+    uint32 protoshareMemoryMode;
+    float donationPercent;
 }minerSettings_t;
 
 extern minerSettings_t minerSettings;
@@ -116,73 +116,73 @@ extern minerSettings_t minerSettings;
 
 typedef struct  
 {
-	// block header data (relevant for midhash)
-	uint32	version;
-	uint8	prevBlockHash[32];
-	uint8	merkleRoot[32];
-	uint32	nTime;
-	uint32	nBits;
-	uint32	nonce;
-	// birthday collision
-	uint32	birthdayA;
-	uint32	birthdayB;
-	uint32	uniqueMerkleSeed;
+    // block header data (relevant for midhash)
+    uint32	version;
+    uint8	prevBlockHash[32];
+    uint8	merkleRoot[32];
+    uint32	nTime;
+    uint32	nBits;
+    uint32	nonce;
+    // birthday collision
+    uint32	birthdayA;
+    uint32	birthdayB;
+    uint32	uniqueMerkleSeed;
 
-	uint32	height;
-	uint8	merkleRootOriginal[32]; // used to identify work
-	uint8	target[32];
-	uint8	targetShare[32];
+    uint32	height;
+    uint8	merkleRootOriginal[32]; // used to identify work
+    uint8	target[32];
+    uint8	targetShare[32];
 }minerProtosharesBlock_t;
 
 typedef struct  
 {
-	// block header data
-	uint32	version;
-	uint8	prevBlockHash[32];
-	uint8	merkleRoot[32];
-	uint32	nTime;
-	uint32	nBits;
-	uint32	nonce;
-	uint32	uniqueMerkleSeed;
-	uint32	height;
-	uint8	merkleRootOriginal[32]; // used to identify work
-	uint8	target[32];
-	uint8	targetShare[32];
+    // block header data
+    uint32	version;
+    uint8	prevBlockHash[32];
+    uint8	merkleRoot[32];
+    uint32	nTime;
+    uint32	nBits;
+    uint32	nonce;
+    uint32	uniqueMerkleSeed;
+    uint32	height;
+    uint8	merkleRootOriginal[32]; // used to identify work
+    uint8	target[32];
+    uint8	targetShare[32];
 }minerScryptBlock_t;
 
 typedef struct  
 {
-	// block header data
-	uint32	version;
-	uint8	prevBlockHash[32];
-	uint8	merkleRoot[32];
-	uint32	nTime;
-	uint32	nBits;
-	uint32	nonce;
-	uint32	uniqueMerkleSeed;
-	uint32	height;
-	uint8	merkleRootOriginal[32]; // used to identify work
-	uint8	target[32];
-	uint8	targetShare[32];
-	// found chain data
-	// todo
+    // block header data
+    uint32	version;
+    uint8	prevBlockHash[32];
+    uint8	merkleRoot[32];
+    uint32	nTime;
+    uint32	nBits;
+    uint32	nonce;
+    uint32	uniqueMerkleSeed;
+    uint32	height;
+    uint8	merkleRootOriginal[32]; // used to identify work
+    uint8	target[32];
+    uint8	targetShare[32];
+    // found chain data
+    // todo
 }minerPrimecoinBlock_t;
 
 typedef struct  
 {
-	// block data (order and memory layout is important)
-	uint32	version;
-	uint8	prevBlockHash[32];
-	uint8	merkleRoot[32];
-	uint32	nTime;
-	uint32	nBits;
-	uint32	nonce;
-	// remaining data
-	uint32	uniqueMerkleSeed;
-	uint32	height;
-	uint8	merkleRootOriginal[32]; // used to identify work
-	uint8	target[32];
-	uint8	targetShare[32];
+    // block data (order and memory layout is important)
+    uint32	version;
+    uint8	prevBlockHash[32];
+    uint8	merkleRoot[32];
+    uint32	nTime;
+    uint32	nBits;
+    uint32	nonce;
+    // remaining data
+    uint32	uniqueMerkleSeed;
+    uint32	height;
+    uint8	merkleRootOriginal[32]; // used to identify work
+    uint8	target[32];
+    uint8	targetShare[32];
 }minerMetiscoinBlock_t; // identical to scryptBlock
 
 typedef struct  
@@ -202,10 +202,10 @@ typedef struct
     uint32 mode;
     float donationPercent;
 
-	uint32 wgs;
-	uint32 buckets_log2;
+    uint32 wgs;
+    uint32 buckets_log2;
     uint32 bucket_size;
-	uint32 target_mem;
+    uint32 target_mem;
     bool   force_local;
 } commandlineInput_t;
 
