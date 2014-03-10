@@ -1,3 +1,6 @@
+# Keep proprietary code set aside
+*.cl
+
 #################
 ## Eclipse
 #################
