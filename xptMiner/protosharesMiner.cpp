@@ -45,6 +45,7 @@ double poisson_estimate(double buckets, double items, double bucket_size) {
     return (total_drops / items);
 }
 
+
 bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midHash, uint32 indexA, uint32 indexB)
 {
 	uint8 tempHash[32+4];
@@ -201,6 +202,8 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
         }
     }
 
+    std::string limit_reason = "";
+
 	// Make sure we can allocate hash_list (cannot violate CL_DEVICE_MAX_MEM_ALLOC_SIZE)
 	if (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) {
 		while (bucket_size > 0 && sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) { bucket_size--; }
@@ -209,11 +212,23 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 			printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
 			exit(0);
 		}
-		printf("Using %d elements per bucket (limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE)\n", bucket_size);
 
-	} else {
-		printf("Using %d elements per bucket\n", bucket_size);
+        limit_reason = "(limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE)";
 	}
+
+    // Make sure we have enough local memory for sort/seek
+    if (sizeof(cl_ulong) * wgs * bucket_size > device->getLocalMemSize()) {
+        while (bucket_size > 0 && sizeof(cl_ulong) * wgs * bucket_size > device->getLocalMemSize()) { bucket_size--; }
+		if (bucket_size == 0) {
+			printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
+			printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
+			exit(0);
+		}
+
+        limit_reason = "(limited by CL_DEVICE_LOCAL_MEM_SIZE, consider increasing \"-b\" or lowering \"-w\")";
+    }
+
+    printf("Using %d elements per bucket %s\n", bucket_size, limit_reason.c_str());
 
 	if (bucket_size < 2) {
 		printf("ERROR: You must allocate at least 2 elements per bucket or you will find no collisions.\n");
@@ -337,6 +352,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 	kernel_reset->resetArgs();
     kernel_reset->addGlobalArg(hash_list);
     kernel_reset->addGlobalArg(index_list);
+    kernel_reset->addLocalArg(sizeof(cl_ulong) * wgs * bucket_size);
 	kernel_reset->addGlobalArg(nonce_a);
 	kernel_reset->addGlobalArg(nonce_b);
 	kernel_reset->addGlobalArg(nonce_qty);

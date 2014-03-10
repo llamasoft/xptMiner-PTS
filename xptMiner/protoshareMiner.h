@@ -7,6 +7,7 @@ class ProtoshareOpenCL {
 public:
 	ProtoshareOpenCL(int device_num);
 	void protoshare_process(minerProtosharesBlock_t* block);
+    bool get_optimal_settings(uint32 *buckets_log2, uint32 *bucket_size, uint32 *mem_target);
 
 private:
 	int device_num;
