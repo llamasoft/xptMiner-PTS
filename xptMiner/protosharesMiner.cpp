@@ -8,7 +8,7 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-#define BUCKET_THRESHOLD        20
+#define BUCKET_THRESHOLD        24
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 
@@ -32,11 +32,13 @@ double factorial(uint32_t n) {
     return rtn;
 }
 
+//                              B               N             E
 double poisson_estimate(double buckets, double items, double bucket_size) {
     double total_drops = 0;
     double f = factorial(bucket_size);
+    uint32 trials = (items / buckets) * 2;
 
-    for (uint32_t i = bucket_size + 1; i < bucket_size + 10; i++) {
+    for (uint32_t i = bucket_size + 1; i < bucket_size + trials; i++) {
         f *= i;
 
         total_drops += (buckets * (i - bucket_size) * pow(items / buckets, (double)i))
@@ -379,7 +381,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 
 #ifdef MEASURE_TIME
     uint32 end = getTimeMilliseconds();
-    printf("Found %d collisions\n", result_qty * 2, 100.00 * (double)overflow_res / (double)MAX_MOMENTUM_NONCE);
+    printf("Found %d collisions\n", result_qty * 2);
     printf("Elapsed time: %d ms (Hash: %d ms, Reset: %d ms)\n", (end-begin), (hash_end-begin), (end-hash_end));
 #endif
 
