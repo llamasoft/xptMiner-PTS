@@ -2,11 +2,16 @@
 #include"ticker.h"
 
 #include <iostream>
+#include <cstring>
 /*
  * Called when a packet with the opcode XPT_OPC_S_AUTH_ACK is received
  */
 bool xptClient_processPacket_authResponse(xptClient_t* xptClient)
 {
+    // Assume invalid until we get a true successful login
+    xptClient->gotLoginResponse = true;
+    xptClient->loginRejected = true;
+
 	xptPacketbuffer_t* cpb = xptClient->recvBuffer;
 	// read data from the packet
 	xptPacketbuffer_beginReadPacket(cpb);
@@ -20,12 +25,16 @@ bool xptClient_processPacket_authResponse(xptClient_t* xptClient)
 	char rejectReason[512];
 	xptPacketbuffer_readString(cpb, rejectReason, 512, &readError);
 	rejectReason[511] = '\0';
+
 	if( readError )
 		return false;
 	if( authErrorCode == 0 )
 	{
 		xptClient->clientState = XPT_CLIENT_STATE_LOGGED_IN;
-		printf("xpt: Logged in with %s\n", xptClient->username);
+
+        // This printf will be handled by xptClient because of deverloper fees
+		//printf("xpt: Logged in with %s\n", xptClient->username);
+
 		if( rejectReason[0] != '\0' )
 			printf("Message from server: %s\n", rejectReason);
 		// start ping mechanism
@@ -34,13 +43,15 @@ bool xptClient_processPacket_authResponse(xptClient_t* xptClient)
 	else
 	{
 		// error logging in -> disconnect
-		printf("xpt: Failed to log in with %s\n", xptClient->username);
+        // This will be handled by xptClient because of deverloper fees
+		//printf("xpt: Failed to log in with %s\n", xptClient->username);
 		if( rejectReason[0] != '\0' )
 			printf("Reason: %s\n", rejectReason);
 		return false;
 	}
 	// get algorithm used by this worker
 	xptClient->algorithm = xptPacketbuffer_readU8(cpb, &readError);
+    xptClient->loginRejected = false;
 	return true;
 }
 

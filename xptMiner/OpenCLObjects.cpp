@@ -253,6 +253,28 @@ std::string OpenCLDevice::getName() {
     return rtn;
 }
 
+std::string OpenCLDevice::getVendor() {
+    size_t param_value_size_ret;
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_VENDOR, 0, NULL, &param_value_size_ret));
+    char *vendor = new char[param_value_size_ret + 1];
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_VENDOR, param_value_size_ret, vendor, NULL));
+
+    std::string rtn(vendor);
+    delete[] vendor;
+    return rtn;
+}
+
+std::string OpenCLDevice::getSupportedExtensions() {
+    size_t param_value_size_ret;
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_EXTENSIONS, 0, NULL, &param_value_size_ret));
+    char *value = new char[param_value_size_ret + 1];
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_EXTENSIONS, param_value_size_ret, value, NULL));
+
+    std::string rtn(value);
+    delete[] value;
+    return rtn;
+}
+
 unsigned long OpenCLDevice::getMaxWorkGroupSize() {
     cl_ulong value;
     check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_WORK_GROUP_SIZE, (sizeof(cl_ulong)), &value, NULL));
@@ -287,6 +309,12 @@ int OpenCLDevice::getMaxWorkItemDimensions() {
     cl_uint value;
     check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, (sizeof(cl_uint)), &value, NULL));
     return value;
+}
+
+bool OpenCLDevice::isGPU() {
+    cl_device_type value;
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, (sizeof(cl_device_type)), &value, NULL));
+    return (value & CL_DEVICE_TYPE_GPU > 0);
 }
 
 std::vector<long> OpenCLDevice::getMaxWorkItemSizes() {

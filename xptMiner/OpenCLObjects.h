@@ -100,12 +100,15 @@ public:
 	virtual ~OpenCLDevice();
     void dumpDeviceInfo();
 	std::string getName();
+    std::string getVendor();
+    std::string getSupportedExtensions();
 	unsigned long getMaxWorkGroupSize();
 	unsigned long getMaxMemAllocSize();
 	unsigned long getMaxParamSize();
 	unsigned long getLocalMemSize();
 	unsigned long getGlobalMemSize();
 	int getMaxWorkItemDimensions();
+    bool isGPU();
 	std::vector<long> getMaxWorkItemSizes();
 	cl_device_id getDeviceId();
 	OpenCLPlatform* getPlatform();

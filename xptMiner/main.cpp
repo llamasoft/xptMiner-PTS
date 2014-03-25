@@ -15,6 +15,7 @@ volatile uint32 totalCollisionCount;
 volatile uint32 totalTableCount;
 volatile double totalOverflowPct;
 volatile uint32 totalShareCount;
+volatile uint32 curShareCount;
 volatile uint32 invalidShareCount;
 volatile uint32 monitorCurrentBlockHeight;
 
@@ -51,6 +52,7 @@ uint32 uniqueMerkleSeedGenerator = 0;
 uint32 miningStartTime = 0;
 
 std::vector<ProtoshareOpenCL *> gpu_processors;
+std::vector<payout_t> payout_list;
 
 commandlineInput_t commandlineInput;
 
@@ -322,13 +324,16 @@ void xptMiner_xptQueryWorkLoop()
 {
     // init xpt connection object once
     xptClient = xptMiner_initateNewXptConnectionObject();
-    if(minerSettings.requestTarget.donationPercent > 0.1f)
-    {
-        // GigaWatt
-        xptClient_addDeveloperFeeEntry(xptClient, "Pstkk1gZCxc4GEwS1eBAykYwVmcubU1P8L", getFeeFromDouble(minerSettings.requestTarget.donationPercent));
-    }
 
     uint32 timerPrintDetails = getTimeMilliseconds() + 8000;
+    
+    uint8 payout_pos = payout_list.size() - 1;
+    uint32 payout_len = 35 * 1000; // Amount of milliseconds per 1% donation
+
+    payout_t cur_payout_info = payout_list.back();
+    bool load_next_user = true;
+    uint32 cur_payout_round_length = 0;
+
     while( true )
     {
         uint32 currentTick = getTimeMilliseconds();
@@ -351,8 +356,8 @@ void xptMiner_xptQueryWorkLoop()
                             speedRate, 100.0 / pow((double)totalTableCount, 0.5), tableRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
                     }
 
-                    if ( passedSeconds > 600 ) {
-                        sharesPerHour = (double)totalShareCount / (double)passedSeconds * 3600.0;
+                    if ( passedSeconds > 900 ) {
+                        sharesPerHour = (double)curShareCount / (double)passedSeconds * 3600.0;
                         printf(", PerHour: %.2f", sharesPerHour);
                     }
                     printf(")\n");
@@ -366,6 +371,43 @@ void xptMiner_xptQueryWorkLoop()
         {
             EnterCriticalSection(&cs_xptClient);
 
+            // We've reached the time limit for the current user, switch to the next one
+            if (cur_payout_round_length > payout_len * cur_payout_info.payout_pct) { load_next_user = true; }
+
+            // Do we need to load the next user?
+            if (load_next_user == true) {
+                load_next_user = false;
+
+                // This should never happen, but just in case...
+                if (payout_list.size() == 0) {
+                    printf("No valid user accounts to login with!\n");
+                    printf("Please check your run log for more details.\n");
+                    exit(-1);
+                }
+
+                payout_pos = (payout_pos + 1) % payout_list.size();
+                cur_payout_info = payout_list[payout_pos];
+
+                xptClient_forceDisconnect(xptClient);
+                minerSettings.requestTarget.authUser = cur_payout_info.workername;
+                minerSettings.requestTarget.authPass = cur_payout_info.workerpass;
+                strncpy(xptClient->username, minerSettings.requestTarget.authUser, 127);
+                strncpy(xptClient->password, minerSettings.requestTarget.authPass, 127);
+                memset(&xptClient->blockWorkInfo, 0x00, sizeof(xptBlockWorkInfo_t));
+                xptClient_connect(xptClient, &minerSettings.requestTarget);
+
+                double mining_length = (cur_payout_info.payout_pct * (double)payout_len) / 1000.0;
+                printf("\n");
+                if (cur_payout_info.is_developer) {
+                    printf("Mining for approx %.0f seconds to support future development\n", mining_length);
+                } else {
+                    printf("Mining shiny coins for the user!\n");
+                }
+
+                cur_payout_round_length = 0;
+            }
+
+
             xptClient_process(xptClient);
             if( xptClient->disconnected )
             {
@@ -378,7 +420,41 @@ void xptMiner_xptQueryWorkLoop()
                 printf("Connection to server lost - Reconnect in 15 seconds\n");
                 xptClient_forceDisconnect(xptClient);
                 LeaveCriticalSection(&cs_xptClient);
-                // pause 15 seconds
+
+                // If we lost connection something login related
+                if ( xptClient->gotLoginResponse == false ) {
+                    // Load the next user, maybe this account is messed up?
+                    load_next_user = true;
+
+                } else {
+                    if ( xptClient->loginRejected ) {
+                        if (cur_payout_info.is_developer) {
+                            Sleep(1000); // Allow server time to print messages
+                            printf("\n\n");
+                            printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                            printf("Whoa nelly!  Contact the developers and let them know they screwed up.\n");
+                            printf("Send them this info:\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct, minerVersionString);
+                            printf("    V - %s\n", minerVersionString);
+                            printf("    L - %s:%s + %f\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct);
+                            printf("    U - %s:%d\n", commandlineInput.host, commandlineInput.port);
+                            printf("    P - %d,%d,%d,%d\n", commandlineInput.buckets_log2, commandlineInput.bucket_size, commandlineInput.target_mem, commandlineInput.wgs);
+                            printf("    E - INVALIDUSER\n");
+                            printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                            printf("\n\n");
+                        }
+
+                        // Delete the info from the list, it's invalid
+                        payout_list.erase(payout_list.begin() + payout_pos);
+                        payout_pos--;
+                        load_next_user = true;
+
+                    } else {
+                        // We had a correct login but still disconnected.
+                        // It probably means the mining pool is down or there are connection issues
+                        // Nothing we can do
+                    }
+                }
+
                 Sleep(15000);
             }
             else
@@ -386,15 +462,41 @@ void xptMiner_xptQueryWorkLoop()
                 // is known algorithm?
                 if( xptClient->clientState == XPT_CLIENT_STATE_LOGGED_IN && (xptClient->algorithm != ALGORITHM_PROTOSHARES) )
                 {
-                    printf("The login is configured for an unsupported algorithm.\n");
-                    printf("Make sure you miner login details are correct\n");
                     // force disconnect
-                    //xptClient_free(xptClient);
-                    //xptClient = NULL;
                     xptClient_forceDisconnect(xptClient);
                     LeaveCriticalSection(&cs_xptClient);
-                    // pause 45 seconds
-                    Sleep(45000);
+
+                    if (cur_payout_info.is_developer) {
+                        Sleep(1000); // Allow server time to print messages
+                        printf("\n\n");
+                        printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                        printf("Whoa nelly!  Contact the developers and let them know they screwed up.\n");
+                        printf("Send them this info:\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct, minerVersionString);
+                        printf("    V - %s\n", minerVersionString);
+                        printf("    L - %s:%s + %f\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct);
+                        printf("    U - %s:%d\n", commandlineInput.host, commandlineInput.port);
+                        printf("    P - %d,%d,%d,%d\n", commandlineInput.buckets_log2, commandlineInput.bucket_size, commandlineInput.target_mem, commandlineInput.wgs);
+                        printf("\tE - BADALGO\n");
+                        printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                        printf("\n\n");
+                        
+                    } else {
+                        printf("The login '%s' is configured for an unsupported algorithm.\n", xptClient->username);
+                        printf("Make sure you miner login details are correct\n");
+                    }
+
+                    // Delete the info from the list, it's invalid
+                    payout_list.erase(payout_list.begin() + payout_pos);
+                    payout_pos--;
+                    load_next_user = true;
+
+                    // Pause so the user can see the message
+                    if (!cur_payout_info.is_developer) {
+                        Sleep(45000);
+                    } else {
+                        Sleep(5000);
+                    }
+
                 }
                 else if( xptClient->blockWorkInfo.height != workDataSource.height || memcmp(xptClient->blockWorkInfo.merkleRoot, workDataSource.merkleRootOriginal, 32) != 0  )
                 {
@@ -407,6 +509,9 @@ void xptMiner_xptQueryWorkLoop()
                     LeaveCriticalSection(&cs_xptClient);
                 }
                 Sleep(1);
+
+                // The time only counts if we're actually logged in
+                cur_payout_round_length += (xptClient->gotLoginResponse ? getTimeMilliseconds() - currentTick : 0);
             }
         }
         else
@@ -426,7 +531,7 @@ void xptMiner_xptQueryWorkLoop()
                 miningStartTime = (uint32)time(NULL);
                 totalCollisionCount = 0;
                 totalTableCount = 0;
-                totalOverflowPct = 0.0;
+                curShareCount = 0;
             }
             Sleep(1);
         }
@@ -449,12 +554,11 @@ void xptMiner_printHelp()
     puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
     puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
     puts("   -b <num>             Number of buckets to use in hashing step");
-    puts("                        Uses 2^N buckets (range = 12 to 26, default is 23)");
+    puts("                        Uses 2^N buckets (range = 12 to 99, default is 23)");
     puts("   -s <num>             Size of buckets to use (0 = MAX, default is 0)");
     puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
     puts("                        (Leave unset if using \"-s\" option)");
-    puts("   -local <bool>        Force using local memory even if data fits in private memory");
-    puts("                        (values: 0 = No, 1 = Yes; default is 0)");
+    puts("   -n <num>             Use N bits for nonce storage (range = 10 to 26, default is 26)");
     puts("");
     puts("Example usage:");
     puts("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0");
@@ -466,11 +570,11 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
     // Default values
     commandlineInput.donationPercent = 3.0f;
-    uint32 wgs = 0;
+    uint32 wgs          =  0;
     uint32 buckets_log2 = 23;
-    uint32 bucket_size = 0;
-    uint32 target_mem = 0;
-    bool   force_local = false;
+    uint32 bucket_size  =  0;
+    uint32 target_mem   =  0;
+    uint32 nonce_bits   = 26;
 
     while( cIdx < argc )
     {
@@ -599,9 +703,9 @@ void xptMiner_parseCommandline(int argc, char **argv)
             }
 
             buckets_log2 = atoi(argv[cIdx]);
-            if (buckets_log2 < 12 || buckets_log2 > 26)
+            if (buckets_log2 < 12 || buckets_log2 > 99)
             {
-                printf("Bucket quantity '%d' is invalid.  Valid values are between 12 and 26.\n", wgs);
+                printf("Bucket quantity '%d' is invalid.  Valid values are between 12 and 26.\n", buckets_log2);
                 exit(0);
             }
 
@@ -629,15 +733,20 @@ void xptMiner_parseCommandline(int argc, char **argv)
             target_mem = atoi(argv[cIdx]);
             cIdx++;
         }
-        else if( memcmp(argument, "-local", 6)==0 || memcmp(argument, "-l", 2)==0 )
+        else if( memcmp(argument, "-n", 2)==0 )
         {
             if ( cIdx >= argc )
             {
-                printf("Missing boolean flag after %s option\n", argument);
+                printf("Missing nonce bits value after %s option\n", argument);
                 exit(0);
             }
 
-            force_local = atoi(argv[cIdx]);
+            nonce_bits = atoi(argv[cIdx]);
+
+            if (nonce_bits < 10 || nonce_bits > 26) {
+                printf("Nonce bit size '%d' is invalid.  Valid values are between 10 and 26.\n", nonce_bits);
+                exit(0);
+            }
             cIdx++;
         }
         else if( memcmp(argument, "-help", 6)==0 || memcmp(argument, "--help", 7)==0 )
@@ -661,7 +770,7 @@ void xptMiner_parseCommandline(int argc, char **argv)
     commandlineInput.buckets_log2 = buckets_log2;
     commandlineInput.bucket_size = bucket_size;
     commandlineInput.target_mem = target_mem;
-    commandlineInput.force_local = force_local;
+    commandlineInput.nonce_bits = nonce_bits;
 }
 
 
@@ -716,7 +825,7 @@ int main(int argc, char** argv)
     printf("\xBA                                                  \xBA\n");
     printf("\xBA  Please donate:                                  \xBA\n");
     printf("\xBA      GigaWatt:                                   \xBA\n");
-    printf("\xBA      PTS: Pstkk1gZCxc4GEwS1eBAykYwVmcubU1P8L     \xBA\n");
+    printf("\xBA      PTS: PbwHkEs9ieWdfJPsowoWingrKyND2uML9s     \xBA\n");
     printf("\xBA      BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV     \xBA\n");
     printf("\xBA                                                  \xBA\n");
     printf("\xC8\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBC\n");
@@ -734,7 +843,12 @@ int main(int argc, char** argv)
     WSAStartup(MAKEWORD(2,2),&wsa);
 #endif
     // get IP of pool url (default ypool.net)
-    char* poolURL = commandlineInput.host;//"ypool.net";
+    char* poolURL = commandlineInput.host;
+    // Convert to lowercase
+    for (uint8 i = 0; poolURL[i] > 0; i++) {
+        if (poolURL[i] >= 'A' && poolURL[i] <= 'Z') { poolURL[i] += ('a' - 'A'); }
+    }
+
     hostent* hostInfo = gethostbyname(poolURL);
     if( hostInfo == NULL )
     {
@@ -786,6 +900,36 @@ int main(int argc, char** argv)
     printf("\nAll GPUs Initialized...\n");
     printf("\n");
     printf("\n");
+
+
+    payout_t payout_temp;
+    double total_payout = 100.00;
+
+    /*
+    // Add GigaWatt to developer fee payout
+    payout_temp.workername = (strstr(poolURL, "ypool") ? "gigawatt.pts_dev" : "PbwHkEs9ieWdfJPsowoWingrKyND2uML9s");
+    payout_temp.workerpass = "x";
+    payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
+    payout_temp.is_developer = true;
+    total_payout -= payout_temp.payout_pct;
+    payout_list.push_back( payout_temp );
+
+    // Add Girino to developer fee payout
+    payout_temp.workername = (strstr(poolURL, "ypool") ? "girino.pts_dev" : "Pr7StLq25Z9nzJ3cG4QNxMwrw9rpid29Py");
+    payout_temp.workerpass = "x";
+    payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
+    payout_temp.is_developer = true;
+    total_payout -= payout_temp.payout_pct;
+    payout_list.push_back( payout_temp );
+    */
+
+    // Add the user's account to payout list
+    payout_temp.workername = commandlineInput.workername;
+    payout_temp.workerpass = commandlineInput.workerpass;
+    payout_temp.payout_pct = total_payout;
+    payout_temp.is_developer = false;
+    payout_list.push_back( payout_temp );
+
 
     // start miner threads
 #ifndef _WIN32

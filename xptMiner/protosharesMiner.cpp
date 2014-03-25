@@ -8,9 +8,12 @@
 #define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
 #define SEARCH_SPACE_BITS		50
 #define BIRTHDAYS_PER_HASH		8
-#define BUCKET_THRESHOLD        24
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
+
+uint32 totalHashTime   = 0;
+uint32 totalInsertTime = 0;
+uint32 totalResetTime  = 0;
 
 #define SWAP64(n)               \
     (  ((n)               << 56) \
@@ -22,6 +25,7 @@
     | (((n) >> 40) &     0xff00) \
     |  ((n) >> 56)             )
 
+
 extern commandlineInput_t commandlineInput;
 
 double factorial(uint32_t n) {
@@ -32,7 +36,7 @@ double factorial(uint32_t n) {
     return rtn;
 }
 
-//                              B               N             E
+
 double poisson_estimate(double buckets, double items, double bucket_size) {
     double total_drops = 0;
     double f = factorial(bucket_size);
@@ -46,6 +50,14 @@ double poisson_estimate(double buckets, double items, double bucket_size) {
     }
 
     return (total_drops / items);
+}
+
+
+size_t calc_hash_mem_usage() { return sizeof(cl_ulong) * MAX_MOMENTUM_NONCE; }
+size_t calc_map_mem_usage(uint32 buckets_log2, uint32 bucket_size) { return sizeof(cl_uint) * (1 << buckets_log2) * bucket_size; }
+
+size_t calc_total_mem_usage(uint32 buckets_log2, uint32 bucket_size) {
+    return calc_hash_mem_usage() + calc_map_mem_usage(buckets_log2, bucket_size);
 }
 
 
@@ -115,6 +127,7 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     {
         //printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
+        curShareCount++;
         xptMiner_submitShare(block);
     }
     // get full block hash (for B A)
@@ -146,6 +159,7 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     {
         // printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
+        curShareCount++;
         xptMiner_submitShare(block);
     }
     return true;
@@ -176,7 +190,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     this->buckets_log2 = commandlineInput.buckets_log2;
     this->bucket_size = commandlineInput.bucket_size;
     this->target_mem = commandlineInput.target_mem;
-    this->force_local = commandlineInput.force_local;
+    this->nonce_bits = commandlineInput.nonce_bits;
 
     printf("Using %d work group size\n", wgs);
     printf("Using 2^%d buckets\n", buckets_log2);
@@ -188,19 +202,15 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
     // If set, convert target memory into a usable value for bucket_size
     if (target_mem > 0) {
-        target_mem = target_mem * 1024 * 1024; // Convert to bytes
-        target_mem = target_mem - 1; // Guarantee results are LESS THAN the specified amount
+        // Convert target to bytes, subtract 1 to guarantee results LESS THAN target
+        uint32 target_mem_temp = (target_mem * 1024 * 1024);
 
-        // Determine the maximum usable bucket_size by solving the following for bucket_size:
-        //   MEM = (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size)
-        //       + (sizeof(cl_uint)  * (1 << buckets_log2))
-        // We use sizeof(cl_ulong) = 8, sizeof(cl_uint) = 4.  This allows us to factor:
-        //   MEM = (4 * (1 << buckets_log2)) * (2 * bucket_size + 1)
-        bucket_size = ((target_mem / (4 * (1 << buckets_log2))) - 1) / 2;
+        // Lazy calculation, assume large bucket_size, scale back from there
+        bucket_size = 1024;
+        while (bucket_size > 0 && calc_total_mem_usage(buckets_log2, bucket_size) > target_mem_temp) { bucket_size--; }
 
         // Make sure the parameter configuration is sane:
         if (bucket_size < 1) {
-            target_mem = (target_mem + 1) / 1024 / 1024; // Undo our butchering
             printf("ERROR: Memory target of %d MB cannot be attained with 2^%d buckets!\n", target_mem, buckets_log2);
             printf("       Please consider lowering the value of \"-b\".\n");
             exit(0);
@@ -210,9 +220,9 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     std::string limit_reason = "";
 
     // Make sure we can allocate hash_list (cannot violate CL_DEVICE_MAX_MEM_ALLOC_SIZE)
-    if (sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) {
-        while (bucket_size > 0 && sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size > device->getMaxMemAllocSize()) { bucket_size--; }
-        if (bucket_size == 0) {
+    if (std::max(calc_hash_mem_usage(), calc_map_mem_usage(buckets_log2, bucket_size)) > device->getMaxMemAllocSize()) {
+        while (bucket_size > 0 && std::max(calc_hash_mem_usage(), calc_map_mem_usage(buckets_log2, bucket_size)) > device->getMaxMemAllocSize()) { bucket_size--; }
+        if (bucket_size < 1) {
             printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
             printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
             exit(0);
@@ -221,31 +231,14 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
         limit_reason = "(limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE)";
     }
 
-    // Make sure we have enough local memory for sort/seek
-    if (sizeof(cl_ulong) * wgs * bucket_size > device->getLocalMemSize()) {
-        while (bucket_size > 0 && sizeof(cl_ulong) * wgs * bucket_size > device->getLocalMemSize()) { bucket_size--; }
-        if (bucket_size == 0) {
-            printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
-            printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
-            exit(0);
-        }
-
-        limit_reason = "(limited by CL_DEVICE_LOCAL_MEM_SIZE, consider increasing \"-b\" or lowering \"-w\")";
-    }
-
     printf("Using %d elements per bucket %s\n", bucket_size, limit_reason.c_str());
+    printf("Using %d bits per nonce\n", nonce_bits);
 
-    if (bucket_size < 2) {
-        printf("ERROR: You must allocate at least 2 elements per bucket or you will find no collisions.\n");
-        printf("       Consider lowering the value of \"-b\" or increasing \"-m\".\n");
-        exit(0);
-    }
 
     // Make sure the whole thing fits in memory
     // Because bucket_size is limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE, I don't think
     //   it's possible to actually reach this.
-    uint32 required_mem = sizeof(cl_ulong) * (1 << buckets_log2) * bucket_size;
-    required_mem += sizeof(cl_uint) * (1 << buckets_log2);
+    uint32 required_mem = calc_total_mem_usage(buckets_log2, bucket_size);
     if (required_mem > device->getGlobalMemSize()) {
         printf("ERROR: Device %d cannot store 2^%d buckets of %d elements!\n", device_num, buckets_log2, bucket_size);
         printf("       You require %d MB of memory but only have %d MB available.\n",
@@ -254,6 +247,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
         printf("       Consider setting a target memory usage with \"-m\".\n");
         exit(0);
     }
+
     printf("Using %d MB of memory\n", required_mem / 1024 / 1024);
     printf("Estimated drop percentage: %5.2f%%\n", 100 * poisson_estimate((1 << buckets_log2), MAX_MOMENTUM_NONCE, bucket_size));
     printf("\n");
@@ -264,22 +258,25 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     std::vector<std::string> file_list;
     file_list.push_back("opencl/momentum.cl");
 
+    bool isAMD = (device->getVendor().find("Advanced Micro Devices") != std::string::npos);
+    bool isGPU = device->isGPU();
+
     std::stringstream params;
     params << " -I ./opencl/";
+    params << " -D DEVICE_AMD_GPU=" << (isGPU && isAMD ? 1 : 0);
+    params << " -D NONCE_BITS=" << nonce_bits;
     params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
     params << " -D BUCKET_SIZE=" << bucket_size;
-    params << " -D BUCKET_THRESHOLD=" << BUCKET_THRESHOLD;
-    params << " -D FORCE_LOCAL=" << (force_local ? 1 : 0);
-    params << " -D LOCAL_WGS=" << wgs;
     OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
-    kernel_hash  = program->getKernel("hash_nonce");
-    kernel_reset = program->getKernel("reset_and_seek");
+    kernel_hash   = program->getKernel("hash_step");
+    kernel_insert = program->getKernel("insert_step");
+    kernel_reset  = program->getKernel("reset_step");
 
     mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
 
-    hash_list  = device->getContext()->createBuffer((1 << buckets_log2) * bucket_size * sizeof(cl_ulong), CL_MEM_READ_WRITE, NULL);
-    index_list = device->getContext()->createBuffer((1 << buckets_log2) * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+    hash_list = device->getContext()->createBuffer(calc_hash_mem_usage(), CL_MEM_READ_WRITE, NULL);
+    nonce_map = device->getContext()->createBuffer(calc_map_mem_usage(buckets_log2, bucket_size), CL_MEM_READ_WRITE, NULL);
 
     nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
     nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
@@ -329,26 +326,20 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 #endif
 
 
-    cl_uint total_work = (MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH);
-
     // Calculate all hashes
     kernel_hash->resetArgs();
 
     kernel_hash->addGlobalArg(mid_hash);
     kernel_hash->addGlobalArg(hash_list);
-    kernel_hash->addGlobalArg(index_list);
-
 
     q->enqueueWriteBuffer(mid_hash, hash_state.b32, 32 * sizeof(cl_uint));
 
-
-    q->enqueueKernel1D(kernel_hash, total_work, wgs);
-
-    q->finish();
+    q->enqueueKernel1D(kernel_hash, MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH, wgs);
 
 #ifdef MEASURE_TIME
+    q->finish();
+    // printf("Inserting...\n");
     uint32 hash_end = getTimeMilliseconds();
-    // printf("Resetting...\n");
 #endif
 
     // Reset index list and find collisions
@@ -356,19 +347,16 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     cl_uint result_a[256];
     cl_uint result_b[256];
 
-    kernel_reset->resetArgs();
-    kernel_reset->addGlobalArg(hash_list);
-    kernel_reset->addGlobalArg(index_list);
-    if (force_local || bucket_size > BUCKET_THRESHOLD) {
-        kernel_reset->addLocalArg(sizeof(cl_ulong) * wgs * bucket_size);
-    }
-    kernel_reset->addGlobalArg(nonce_a);
-    kernel_reset->addGlobalArg(nonce_b);
-    kernel_reset->addGlobalArg(nonce_qty);
+    kernel_insert->resetArgs();
+    kernel_insert->addGlobalArg(hash_list);
+    kernel_insert->addGlobalArg(nonce_map);
+    kernel_insert->addGlobalArg(nonce_a);
+    kernel_insert->addGlobalArg(nonce_b);
+    kernel_insert->addGlobalArg(nonce_qty);
 
     q->enqueueWriteBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
 
-    q->enqueueKernel1D(kernel_reset, (1 << buckets_log2), wgs);
+    q->enqueueKernel1D(kernel_insert, MAX_MOMENTUM_NONCE, wgs);
 
     q->enqueueReadBuffer(nonce_a,   result_a,    sizeof(cl_uint) * 256);
     q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
@@ -380,9 +368,30 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     }
 
 #ifdef MEASURE_TIME
+    q->finish();
+    //printf("Resetting...\n");
+    uint32 insert_end = getTimeMilliseconds();
+#endif
+    
+    kernel_reset->resetArgs();
+    kernel_reset->addGlobalArg(nonce_map);
+    q->enqueueKernel1D(kernel_reset, (1 << buckets_log2) * bucket_size / 16, wgs);
+    q->finish();
+
+#ifdef MEASURE_TIME
     uint32 end = getTimeMilliseconds();
-    printf("Found %d collisions\n", result_qty * 2);
-    printf("Elapsed time: %d ms (Hash: %d ms, Reset: %d ms)\n", (end-begin), (hash_end-begin), (end-hash_end));
+    totalHashTime += (hash_end-begin);
+    totalInsertTime += (insert_end-hash_end);
+    totalResetTime += (end-insert_end);
+    printf("Found %2d collisions in %4d ms (Hash: %4d ms, Insert: %4d ms, Reset: %4d ms)\n", result_qty * 2, (end-begin), (hash_end-begin), (insert_end-hash_end), (end-insert_end));
+
+    if (totalTableCount > 0 && totalTableCount % 10 == 0) {
+        printf("AVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d\n",
+            (totalHashTime + totalInsertTime + totalResetTime) / totalTableCount,
+            totalHashTime / totalTableCount,
+            totalInsertTime / totalTableCount,
+            totalResetTime / totalTableCount);
+    }
 #endif
 
     totalTableCount++;

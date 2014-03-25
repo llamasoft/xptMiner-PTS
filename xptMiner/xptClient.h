@@ -48,6 +48,8 @@ typedef struct
 	uint32 opcode;
 	// disconnect info
 	bool disconnected;
+    bool gotLoginResponse;
+    bool loginRejected;
 	// work data
 	CRITICAL_SECTION cs_workAccess;
 	xptBlockWorkInfo_t blockWorkInfo;

@@ -104,10 +104,13 @@ bool xptClient_connect(xptClient_t* xptClient, generalRequestTarget_t* target)
 	strncpy(xptClient->password, target->authPass, 127);
 	// reset old work info
 	memset(&xptClient->blockWorkInfo, 0x00, sizeof(xptBlockWorkInfo_t));
-	// send worker login
+
+    // Suppress initial login, let deverloper fee rotation handle this
 	xptClient_sendWorkerLogin(xptClient);
+
 	// mark as connected
 	xptClient->disconnected = false;
+    xptClient->gotLoginResponse = false;
 	// return success
 	return true;
 }

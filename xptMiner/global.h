@@ -206,11 +206,21 @@ typedef struct
     uint32 buckets_log2;
     uint32 bucket_size;
     uint32 target_mem;
-    bool   force_local;
+    uint32 nonce_bits;
 } commandlineInput_t;
 
-#include"scrypt.h"
-#include"algorithm.h"
+
+typedef struct
+{
+    char* workername;
+    char* workerpass;
+    double payout_pct;
+    bool is_developer;
+} payout_t;
+
+
+#include "scrypt.h"
+#include "algorithm.h"
 
 void xptMiner_submitShare(minerProtosharesBlock_t* block);
 void xptMiner_submitShare(minerScryptBlock_t* block);
@@ -221,7 +231,11 @@ void xptMiner_submitShare(minerMetiscoinBlock_t* block);
 extern volatile uint32 totalCollisionCount;
 extern volatile uint32 totalTableCount;
 extern volatile uint32 totalShareCount;
+extern volatile uint32 curShareCount;
 extern volatile uint32 invalidShareCount;
 extern volatile uint32 monitorCurrentBlockHeight;
+
+
+extern std::vector<payout_t> payout_list;
 
 #endif

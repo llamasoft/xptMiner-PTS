@@ -15,14 +15,15 @@ private:
     uint32 buckets_log2;
     uint32 bucket_size;
     uint32 target_mem;
-    bool   force_local;
+    uint32 nonce_bits;
 
     OpenCLKernel* kernel_hash;
+    OpenCLKernel* kernel_insert;
     OpenCLKernel* kernel_reset;
 
     OpenCLBuffer* mid_hash;
     OpenCLBuffer* hash_list;
-    OpenCLBuffer* index_list;
+    OpenCLBuffer* nonce_map;
 
     OpenCLBuffer* nonce_a;
     OpenCLBuffer* nonce_b;
