@@ -132,7 +132,8 @@ public:
 	OpenCLCommandQueue* createCommandQueue(OpenCLDevice* device);
 
 	// buffers are not stored in the context. Algos have the responsibility to dealocate them;
-	OpenCLBuffer * createBuffer(size_t size, cl_mem_flags flags=CL_MEM_READ_WRITE, void* original=NULL);
+	OpenCLBuffer* createBuffer(size_t size, cl_mem_flags flags=CL_MEM_READ_WRITE, void* original=NULL);
+    OpenCLBuffer* createImage(cl_mem_flags, cl_image_format, cl_image_desc, void*);
 
 	OpenCLProgram* getProgram(int pos);
 private:

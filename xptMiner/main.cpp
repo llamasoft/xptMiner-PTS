@@ -9,7 +9,7 @@
 #define MAX_TRANSACTIONS	(4096)
 
 // miner version string (for pool statistic)
-char* minerVersionString = "xptMiner 1.5gg";
+char* minerVersionString = "xptMiner-PTS 1.2gg";
 
 volatile uint32 totalCollisionCount;
 volatile uint32 totalTableCount;
@@ -433,7 +433,7 @@ void xptMiner_xptQueryWorkLoop()
                             printf("\n\n");
                             printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
                             printf("Whoa nelly!  Contact the developers and let them know they screwed up.\n");
-                            printf("Send them this info:\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct, minerVersionString);
+                            printf("Send them this info:\n");
                             printf("    V - %s\n", minerVersionString);
                             printf("    L - %s:%s + %f\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct);
                             printf("    U - %s:%d\n", commandlineInput.host, commandlineInput.port);
@@ -471,7 +471,7 @@ void xptMiner_xptQueryWorkLoop()
                         printf("\n\n");
                         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
                         printf("Whoa nelly!  Contact the developers and let them know they screwed up.\n");
-                        printf("Send them this info:\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct, minerVersionString);
+                        printf("Send them this info:\n");
                         printf("    V - %s\n", minerVersionString);
                         printf("    L - %s:%s + %f\n", cur_payout_info.workername, cur_payout_info.workerpass, cur_payout_info.payout_pct);
                         printf("    U - %s:%d\n", commandlineInput.host, commandlineInput.port);
@@ -502,6 +502,14 @@ void xptMiner_xptQueryWorkLoop()
                 {
                     // update work
                     xptMiner_getWorkFromXPTConnection(xptClient);
+                    LeaveCriticalSection(&cs_xptClient);
+                }
+                else if ( xptClient->clientState != XPT_CLIENT_STATE_LOGGED_IN && (uint32)time(NULL) - miningStartTime > 120 )
+                {
+                    // There's a super annoying bug where a login response is never received from the yPool servers.
+                    // To prevent permanently being stuck in limbo, force a disconnect and reconnect by swapping users.
+                    printf("Network issues detected, attempting to reconnect.\n");
+                    load_next_user = true;
                     LeaveCriticalSection(&cs_xptClient);
                 }
                 else
@@ -550,12 +558,13 @@ void xptMiner_printHelp()
     puts("   -t <num>             The number of threads for mining (default is 1)");
     puts("   -f <num>             Donation amount for dev (default donates 3.0% to dev)");
     puts("");
-    puts("GPU options:");
+    puts("Mining options:");
     puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
-    puts("   -w <num>             GPU work group size (0 = MAX, default is 0)");
+    puts("   -w <num>             GPU work group size (0 = MAX, default is 0, must be power of 2)");
+    puts("   -v <num>             Vector size (values = 1, 2, 4; default is 1)");
     puts("   -b <num>             Number of buckets to use in hashing step");
-    puts("                        Uses 2^N buckets (range = 12 to 99, default is 23)");
-    puts("   -s <num>             Size of buckets to use (0 = MAX, default is 0)");
+    puts("                        Uses 2^N buckets (range = 12 to 99, default is 27)");
+    puts("   -s <num>             Size of buckets to use (0 = MAX, default is 1)");
     puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
     puts("                        (Leave unset if using \"-s\" option)");
     puts("   -n <num>             Use N bits for nonce storage (range = 10 to 26, default is 26)");
@@ -571,8 +580,9 @@ void xptMiner_parseCommandline(int argc, char **argv)
     // Default values
     commandlineInput.donationPercent = 3.0f;
     uint32 wgs          =  0;
-    uint32 buckets_log2 = 23;
-    uint32 bucket_size  =  0;
+    uint32 vect_type    =  1;
+    uint32 buckets_log2 = 27;
+    uint32 bucket_size  =  1;
     uint32 target_mem   =  0;
     uint32 nonce_bits   = 26;
 
@@ -694,6 +704,25 @@ void xptMiner_parseCommandline(int argc, char **argv)
             wgs = nearest_pow2(wgs);
             cIdx++;
         }
+        else if( memcmp(argument, "-v", 2)==0 )
+        {
+            if ( cIdx >= argc )
+            {
+                printf("Missing vector size after %s option\n", argument);
+                exit(0);
+            }
+
+            vect_type = atoi(argv[cIdx]);
+            if (vect_type != 1 && vect_type != 2 && vect_type != 4)
+            {
+                printf("Vector size '%d' is invalid.  Valid values are 1, 2, or 4.\n", wgs);
+                exit(0);
+            }
+
+            // Find nearest power of two less than wgs
+            wgs = nearest_pow2(wgs);
+            cIdx++;
+        }
         else if( memcmp(argument, "-b", 2)==0 )
         {
             if ( cIdx >= argc )
@@ -767,6 +796,7 @@ void xptMiner_parseCommandline(int argc, char **argv)
     }
 
     commandlineInput.wgs = wgs;
+    commandlineInput.vect_type = vect_type;
     commandlineInput.buckets_log2 = buckets_log2;
     commandlineInput.bucket_size = bucket_size;
     commandlineInput.target_mem = target_mem;
@@ -821,12 +851,17 @@ int main(int argc, char** argv)
     printf("\xBA                                                  \xBA\n");
     printf("\xBA  xptMiner (v1.1) + GPU Protoshare Miner (v0.1g)  \xBA\n");
     printf("\xBA  Author: GigaWatt (GPU Code)                     \xBA\n");
+    printf("\xBA          Girino   (GPU Code)                     \xBA\n");
     printf("\xBA          jh00     (xptMiner)                     \xBA\n");
     printf("\xBA                                                  \xBA\n");
     printf("\xBA  Please donate:                                  \xBA\n");
     printf("\xBA      GigaWatt:                                   \xBA\n");
     printf("\xBA      PTS: PbwHkEs9ieWdfJPsowoWingrKyND2uML9s     \xBA\n");
     printf("\xBA      BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV     \xBA\n");
+    printf("\xBA                                                  \xBA\n");
+    printf("\xBA      Girino:                                     \xBA\n");
+    printf("\xBA      PTS: PkyeQNn1yGV5psGeZ4sDu6nz2vWHTujf4h     \xBA\n");
+    printf("\xBA      BTC: 1GiRiNoKznfGbt8bkU1Ley85TgVV7ZTXce     \xBA\n");
     printf("\xBA                                                  \xBA\n");
     printf("\xC8\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBC\n");
     printf("Launching miner...\n");
@@ -905,7 +940,6 @@ int main(int argc, char** argv)
     payout_t payout_temp;
     double total_payout = 100.00;
 
-    /*
     // Add GigaWatt to developer fee payout
     payout_temp.workername = (strstr(poolURL, "ypool") ? "gigawatt.pts_dev" : "PbwHkEs9ieWdfJPsowoWingrKyND2uML9s");
     payout_temp.workerpass = "x";
@@ -921,7 +955,6 @@ int main(int argc, char** argv)
     payout_temp.is_developer = true;
     total_payout -= payout_temp.payout_pct;
     payout_list.push_back( payout_temp );
-    */
 
     // Add the user's account to payout list
     payout_temp.workername = commandlineInput.workername;

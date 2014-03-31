@@ -16,6 +16,7 @@ private:
     uint32 bucket_size;
     uint32 target_mem;
     uint32 nonce_bits;
+    uint32 vect_type;
 
     OpenCLKernel* kernel_hash;
     OpenCLKernel* kernel_insert;

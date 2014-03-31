@@ -451,12 +451,18 @@ OpenCLCommandQueue* OpenCLContext::createCommandQueue(OpenCLDevice* device) {
     return new OpenCLCommandQueue(ret);
 }
 
-OpenCLBuffer* OpenCLContext::createBuffer(size_t size, cl_mem_flags flags,
-    void* original) {
-        int error;
-        cl_mem ret = clCreateBuffer(this->context, flags, size, original, &error);
-        check_error(error);
-        return new OpenCLBuffer(ret);
+OpenCLBuffer* OpenCLContext::createBuffer(size_t size, cl_mem_flags flags, void* original) {
+    int error;
+    cl_mem ret = clCreateBuffer(this->context, flags, size, original, &error);
+    check_error(error);
+    return new OpenCLBuffer(ret);
+}
+
+OpenCLBuffer* OpenCLContext::createImage(cl_mem_flags flags, cl_image_format img_fmt, cl_image_desc img_desc, void* host_ptr) {
+    int error;
+    cl_mem ret = clCreateImage(this->context, flags, &img_fmt, &img_desc, host_ptr, &error);
+    check_error(error);
+    return new OpenCLBuffer(ret);
 }
 
 OpenCLBuffer::OpenCLBuffer(cl_mem _buffer) {
@@ -513,29 +519,24 @@ void OpenCLKernel::addLocalArg(size_t size) {
     arg_count++;
 }
 
-void OpenCLCommandQueue::enqueueWriteBuffer(OpenCLBuffer* dest, void* origin,
-    size_t size) {
-        check_error(clEnqueueWriteBuffer(this->queue, dest->buffer, CL_FALSE, 0, size, origin, 0, NULL, NULL));
+void OpenCLCommandQueue::enqueueWriteBuffer(OpenCLBuffer* dest, void* origin, size_t size) {
+    check_error(clEnqueueWriteBuffer(this->queue, dest->buffer, CL_FALSE, 0, size, origin, 0, NULL, NULL));
 }
 
-void OpenCLCommandQueue::enqueueWriteBufferBlocking(OpenCLBuffer* dest,
-    void* origin, size_t size) {
-        check_error(clEnqueueWriteBuffer(this->queue, dest->buffer, CL_TRUE, 0, size, origin, 0, NULL, NULL));
+void OpenCLCommandQueue::enqueueWriteBufferBlocking(OpenCLBuffer* dest, void* origin, size_t size) {
+    check_error(clEnqueueWriteBuffer(this->queue, dest->buffer, CL_TRUE, 0, size, origin, 0, NULL, NULL));
 }
 
-void OpenCLCommandQueue::enqueueKernel1D(OpenCLKernel *kernel,
-    size_t worksize, size_t work_items) {
-        check_error(clEnqueueNDRangeKernel (this->queue, kernel->getKernel(), 1, NULL, &worksize, &work_items, 0, NULL, NULL));
+void OpenCLCommandQueue::enqueueKernel1D(OpenCLKernel *kernel, size_t worksize, size_t work_items) {
+    check_error(clEnqueueNDRangeKernel (this->queue, kernel->getKernel(), 1, NULL, &worksize, &work_items, 0, NULL, NULL));
 }
 
-void OpenCLCommandQueue::enqueueReadBuffer(OpenCLBuffer* origin, void* dest,
-    size_t size) {
-        check_error(clEnqueueReadBuffer(this->queue, origin->buffer, CL_FALSE, 0, size, dest, 0, NULL, NULL));
+void OpenCLCommandQueue::enqueueReadBuffer(OpenCLBuffer* origin, void* dest, size_t size) {
+    check_error(clEnqueueReadBuffer(this->queue, origin->buffer, CL_FALSE, 0, size, dest, 0, NULL, NULL));
 }
 
-void OpenCLCommandQueue::enqueueReadBufferBlocking(OpenCLBuffer* origin,
-    void* dest, size_t size) {
-        check_error(clEnqueueReadBuffer(this->queue, origin->buffer, CL_TRUE, 0, size, dest, 0, NULL, NULL));
+void OpenCLCommandQueue::enqueueReadBufferBlocking(OpenCLBuffer* origin, void* dest, size_t size) {
+    check_error(clEnqueueReadBuffer(this->queue, origin->buffer, CL_TRUE, 0, size, dest, 0, NULL, NULL));
 }
 
 void OpenCLCommandQueue::finish() {
@@ -548,8 +549,7 @@ OpenCLProgram* OpenCLContext::getProgram(int pos) {
 
 size_t OpenCLKernel::getWorkGroupSize(OpenCLDevice* device) {
     size_t ret = 0;
-    check_error(clGetKernelWorkGroupInfo(this->kernel, device->getDeviceId(),
-        CL_KERNEL_WORK_GROUP_SIZE, sizeof(ret), &ret, NULL));
+    check_error(clGetKernelWorkGroupInfo(this->kernel, device->getDeviceId(), CL_KERNEL_WORK_GROUP_SIZE, sizeof(ret), &ret, NULL));
     return ret;
 }
 

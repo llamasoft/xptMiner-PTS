@@ -5,11 +5,13 @@
 #include <cmath>
 #include <cstdlib>
 
-#define MAX_MOMENTUM_NONCE		(1<<26)	// 67.108.864
-#define SEARCH_SPACE_BITS		50
-#define BIRTHDAYS_PER_HASH		8
+#define MAX_NONCE_BITS          ( 26 )
+#define MAX_MOMENTUM_NONCE		(1 << MAX_NONCE_BITS)
+#define SEARCH_SPACE_BITS		( 50 )
+#define BIRTHDAYS_PER_HASH		( 8 )
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
+// #define NOSUBMIT
 
 uint32 totalHashTime   = 0;
 uint32 totalInsertTime = 0;
@@ -36,11 +38,13 @@ double factorial(uint32_t n) {
     return rtn;
 }
 
-
+// Estimates the number of dropped records based on bucket size, number of buckets, and number of elements
+// https://en.wikipedia.org/wiki/Poisson_distribution
 double poisson_estimate(double buckets, double items, double bucket_size) {
     double total_drops = 0;
     double f = factorial(bucket_size);
     uint32 trials = (items / buckets) * 2;
+    trials = std::max(trials, (uint32)25);
 
     for (uint32_t i = bucket_size + 1; i < bucket_size + trials; i++) {
         f *= i;
@@ -128,7 +132,9 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
         //printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
         curShareCount++;
+#ifndef NOSUBMIT
         xptMiner_submitShare(block);
+#endif
     }
     // get full block hash (for B A)
     block->birthdayA = indexB;
@@ -160,7 +166,9 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
         // printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
         curShareCount++;
+#ifndef NOSUBMIT
         xptMiner_submitShare(block);
+#endif
     }
     return true;
 }
@@ -188,12 +196,23 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     }
 
     this->buckets_log2 = commandlineInput.buckets_log2;
+    this->vect_type = commandlineInput.vect_type;
     this->bucket_size = commandlineInput.bucket_size;
     this->target_mem = commandlineInput.target_mem;
     this->nonce_bits = commandlineInput.nonce_bits;
 
+
     printf("Using %d work group size\n", wgs);
+    printf("Using vector size %d\n", vect_type);
     printf("Using 2^%d buckets\n", buckets_log2);
+
+    // Make sure hash list fits in memory or give up
+    if (calc_hash_mem_usage() > device->getGlobalMemSize() || calc_hash_mem_usage() > device->getMaxMemAllocSize()) {
+        printf("ERROR: Your device doesn't support the minimum requried memory to use this program.\n");
+        printf("       This program requires at least %d MB of contiguous memory,\n", calc_hash_mem_usage() / 1024 / 1024);
+        printf("       but your device only supports up to %d MB.\n", std::min(device->getGlobalMemSize(), device->getMaxMemAllocSize()) / 1024 / 1024);
+        exit(0);
+    }
 
     // If bucket size unset and target memory unset, use maximum usable memory
     if (target_mem == 0 && bucket_size == 0) {
@@ -264,9 +283,12 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     std::stringstream params;
     params << " -I ./opencl/";
     params << " -D DEVICE_AMD_GPU=" << (isGPU && isAMD ? 1 : 0);
-    params << " -D NONCE_BITS=" << nonce_bits;
+    params << " -D VECT_TYPE=" << vect_type;
+    params << " -D LOCAL_WGS=" << wgs;
     params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
     params << " -D BUCKET_SIZE=" << bucket_size;
+    params << " -D NONCE_BITS=" << nonce_bits;
+    params << " -D NONCE_GAP=" << (1 << (MAX_NONCE_BITS - nonce_bits));
     OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
 
     kernel_hash   = program->getKernel("hash_step");
@@ -276,10 +298,11 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     mid_hash = device->getContext()->createBuffer(32 * sizeof(cl_uint), CL_MEM_READ_ONLY, NULL);
 
     hash_list = device->getContext()->createBuffer(calc_hash_mem_usage(), CL_MEM_READ_WRITE, NULL);
+
     nonce_map = device->getContext()->createBuffer(calc_map_mem_usage(buckets_log2, bucket_size), CL_MEM_READ_WRITE, NULL);
 
-    nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
-    nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
+    nonce_a = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_WRITE_ONLY, NULL);
+    nonce_b = device->getContext()->createBuffer(256 * sizeof(cl_uint), CL_MEM_WRITE_ONLY, NULL);
     nonce_qty = device->getContext()->createBuffer(sizeof(cl_uint), CL_MEM_READ_WRITE, NULL);
 
     q = device->getContext()->createCommandQueue(device);
@@ -304,7 +327,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     sha256_update(&c256, (unsigned char*)midHash, 32);
     sha256_final(&c256, (unsigned char*)midHash);
 
-    union { uint64 b64[16]; uint32 b32[32]; } hash_state;
+    union { cl_ulong b64[16]; cl_uint b32[32]; } hash_state;
     hash_state.b32[0] = 0; // Reserved for nonce
     hash_state.b32[1] = midHash[0];
     hash_state.b32[2] = midHash[1];
@@ -329,12 +352,16 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     // Calculate all hashes
     kernel_hash->resetArgs();
 
-    kernel_hash->addGlobalArg(mid_hash);
+    kernel_hash->addScalarULong(hash_state.b64[0]);
+    kernel_hash->addScalarULong(hash_state.b64[1]);
+    kernel_hash->addScalarULong(hash_state.b64[2]);
+    kernel_hash->addScalarULong(hash_state.b64[3]);
+    kernel_hash->addScalarULong(hash_state.b64[4]);
     kernel_hash->addGlobalArg(hash_list);
 
-    q->enqueueWriteBuffer(mid_hash, hash_state.b32, 32 * sizeof(cl_uint));
+    q->enqueueWriteBuffer(mid_hash, hash_state.b32, 10 * sizeof(cl_uint));
 
-    q->enqueueKernel1D(kernel_hash, MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH, wgs);
+    q->enqueueKernel1D(kernel_hash, MAX_MOMENTUM_NONCE / BIRTHDAYS_PER_HASH / vect_type, wgs);
 
 #ifdef MEASURE_TIME
     q->finish();
@@ -361,38 +388,40 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     q->enqueueReadBuffer(nonce_a,   result_a,    sizeof(cl_uint) * 256);
     q->enqueueReadBuffer(nonce_b,   result_b,    sizeof(cl_uint) * 256);
     q->enqueueReadBuffer(nonce_qty, &result_qty, sizeof(cl_uint));
-    q->finish();
 
-    for (int i = 0; i < result_qty; i++) {
-        protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
-    }
 
 #ifdef MEASURE_TIME
     q->finish();
-    //printf("Resetting...\n");
+    // printf("Resetting...\n");
     uint32 insert_end = getTimeMilliseconds();
 #endif
-    
+
     kernel_reset->resetArgs();
     kernel_reset->addGlobalArg(nonce_map);
-    q->enqueueKernel1D(kernel_reset, (1 << buckets_log2) * bucket_size / 16, wgs);
+    q->enqueueKernel1D(kernel_reset, (1 << buckets_log2) * bucket_size, wgs);
     q->finish();
 
 #ifdef MEASURE_TIME
     uint32 end = getTimeMilliseconds();
-    totalHashTime += (hash_end-begin);
-    totalInsertTime += (insert_end-hash_end);
-    totalResetTime += (end-insert_end);
+    uint32 warmup_skips = 3;
+    if (totalTableCount > warmup_skips) { // Allow some warmup time
+        totalHashTime   += (hash_end-begin);
+        totalInsertTime += (insert_end-hash_end);
+        totalResetTime  += (end-insert_end);
+    }
     printf("Found %2d collisions in %4d ms (Hash: %4d ms, Insert: %4d ms, Reset: %4d ms)\n", result_qty * 2, (end-begin), (hash_end-begin), (insert_end-hash_end), (end-insert_end));
 
     if (totalTableCount > 0 && totalTableCount % 10 == 0) {
-        printf("AVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d\n",
-            (totalHashTime + totalInsertTime + totalResetTime) / totalTableCount,
-            totalHashTime / totalTableCount,
-            totalInsertTime / totalTableCount,
-            totalResetTime / totalTableCount);
+        printf("\nAVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d\n\n",
+            (totalHashTime + totalInsertTime + totalResetTime) / (totalTableCount - warmup_skips),
+            totalHashTime   / (totalTableCount - warmup_skips),
+            totalInsertTime / (totalTableCount - warmup_skips),
+            totalResetTime  / (totalTableCount - warmup_skips));
     }
 #endif
 
+    for (int i = 0; i < result_qty; i++) {
+        protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
+    }
     totalTableCount++;
 }
