@@ -18,6 +18,8 @@ private:
     uint32 nonce_bits;
     uint32 vect_type;
 
+    OpenCLDevice* device;
+
     OpenCLKernel* kernel_hash;
     OpenCLKernel* kernel_insert;
     OpenCLKernel* kernel_reset;
@@ -25,7 +27,6 @@ private:
     OpenCLBuffer* mid_hash;
     OpenCLBuffer* hash_list;
     OpenCLBuffer* nonce_map;
-
     OpenCLBuffer* nonce_a;
     OpenCLBuffer* nonce_b;
     OpenCLBuffer* nonce_qty;

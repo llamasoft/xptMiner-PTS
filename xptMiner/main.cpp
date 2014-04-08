@@ -1,11 +1,11 @@
 ﻿#include "global.h"
 #include "ticker.h"
 #include "OpenCLObjects.h"
-// #include "metiscoinMiner.h"
 #include "protoshareMiner.h"
-#include <signal.h>
-#include <stdio.h>
+#include <csignal>
+#include <cstdio>
 #include <cstring>
+#include <cmath>
 #define MAX_TRANSACTIONS	(4096)
 
 // miner version string (for pool statistic)
@@ -50,6 +50,11 @@ struct
 
 uint32 uniqueMerkleSeedGenerator = 0;
 uint32 miningStartTime = 0;
+
+// GPU watchdog to detect Windows TDR or hangs.
+// Maximum wait extended by 2x if mining on CPU.
+uint32 gpu_watchdog_max_wait = 5;
+uint32 gpu_watchdog_timer = 0;
 
 std::vector<ProtoshareOpenCL *> gpu_processors;
 std::vector<payout_t> payout_list;
@@ -99,108 +104,6 @@ void xptMiner_submitShare(minerProtosharesBlock_t* block)
     LeaveCriticalSection(&cs_xptClient);
 }
 
-/*
-* Submit Scrypt share
-*/
-void xptMiner_submitShare(minerScryptBlock_t* block)
-{
-    printf("Share found! (Blockheight: %d)\n", block->height);
-    EnterCriticalSection(&cs_xptClient);
-    if( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true )
-    {
-        printf("Share submission failed - No connection to server\n");
-        LeaveCriticalSection(&cs_xptClient);
-        return;
-    }
-    // submit block
-    xptShareToSubmit_t* xptShare = (xptShareToSubmit_t*)malloc(sizeof(xptShareToSubmit_t));
-    memset(xptShare, 0x00, sizeof(xptShareToSubmit_t));
-    xptShare->algorithm = ALGORITHM_SCRYPT;
-    xptShare->version = block->version;
-    xptShare->nTime = block->nTime;
-    xptShare->nonce = block->nonce;
-    xptShare->nBits = block->nBits;
-    memcpy(xptShare->prevBlockHash, block->prevBlockHash, 32);
-    memcpy(xptShare->merkleRoot, block->merkleRoot, 32);
-    memcpy(xptShare->merkleRootOriginal, block->merkleRootOriginal, 32);
-    //userExtraNonceLength = std::min(userExtraNonceLength, 16);
-    sint32 userExtraNonceLength = sizeof(uint32);
-    uint8* userExtraNonceData = (uint8*)&block->uniqueMerkleSeed;
-    xptShare->userExtraNonceLength = userExtraNonceLength;
-    memcpy(xptShare->userExtraNonceData, userExtraNonceData, userExtraNonceLength);
-    xptClient_foundShare(xptClient, xptShare);
-    LeaveCriticalSection(&cs_xptClient);
-}
-
-/*
-* Submit Primecoin share
-*/
-void xptMiner_submitShare(minerPrimecoinBlock_t* block)
-{
-    printf("Share found! (Blockheight: %d)\n", block->height);
-    EnterCriticalSection(&cs_xptClient);
-
-    if( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true )
-    {
-        printf("Share submission failed - No connection to server\n");
-        LeaveCriticalSection(&cs_xptClient);
-
-        return;
-    }
-    // submit block
-    xptShareToSubmit_t* xptShare = (xptShareToSubmit_t*)malloc(sizeof(xptShareToSubmit_t));
-    memset(xptShare, 0x00, sizeof(xptShareToSubmit_t));
-    xptShare->algorithm = ALGORITHM_PRIME;
-    xptShare->version = block->version;
-    xptShare->nTime = block->nTime;
-    xptShare->nonce = block->nonce;
-    xptShare->nBits = block->nBits;
-    memcpy(xptShare->prevBlockHash, block->prevBlockHash, 32);
-    memcpy(xptShare->merkleRoot, block->merkleRoot, 32);
-    memcpy(xptShare->merkleRootOriginal, block->merkleRootOriginal, 32);
-    //userExtraNonceLength = std::min(userExtraNonceLength, 16);
-    sint32 userExtraNonceLength = sizeof(uint32);
-    uint8* userExtraNonceData = (uint8*)&block->uniqueMerkleSeed;
-    xptShare->userExtraNonceLength = userExtraNonceLength;
-    memcpy(xptShare->userExtraNonceData, userExtraNonceData, userExtraNonceLength);
-    __debugbreak(); 
-    xptClient_foundShare(xptClient, xptShare);
-    LeaveCriticalSection(&cs_xptClient);
-
-}
-
-/*
-* Submit Metiscoin share
-*/
-void xptMiner_submitShare(minerMetiscoinBlock_t* block)
-{
-    printf("Share found! (Nonce: %#010x; Blockheight: %d)\n", block->nonce, block->height);
-    EnterCriticalSection(&cs_xptClient);
-
-    if( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true )
-    {
-        printf("Share submission failed - No connection to server\n");
-        LeaveCriticalSection(&cs_xptClient);
-        return;
-    }
-    // submit block
-    xptShareToSubmit_t* xptShare = (xptShareToSubmit_t*)malloc(sizeof(xptShareToSubmit_t));
-    memset(xptShare, 0x00, sizeof(xptShareToSubmit_t));
-    xptShare->algorithm = ALGORITHM_METISCOIN;
-    xptShare->version = block->version;
-    xptShare->nTime = block->nTime;
-    xptShare->nonce = block->nonce;
-    xptShare->nBits = block->nBits;
-    memcpy(xptShare->prevBlockHash, block->prevBlockHash, 32);
-    memcpy(xptShare->merkleRoot, block->merkleRoot, 32);
-    memcpy(xptShare->merkleRootOriginal, block->merkleRootOriginal, 32);
-    sint32 userExtraNonceLength = sizeof(uint32);
-    uint8* userExtraNonceData = (uint8*)&block->uniqueMerkleSeed;
-    xptShare->userExtraNonceLength = userExtraNonceLength;
-    memcpy(xptShare->userExtraNonceData, userExtraNonceData, userExtraNonceLength);
-    xptClient_foundShare(xptClient, xptShare);
-    LeaveCriticalSection(&cs_xptClient);
-}
 
 #ifdef _WIN32
 int xptMiner_minerThread(int threadIndex)
@@ -252,7 +155,9 @@ void *xptMiner_minerThread(void *arg)
         // valid work data present, start processing workload
         if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
         {
+            gpu_watchdog_timer = getTimeMilliseconds();
             processor->protoshare_process(&minerProtosharesBlock);
+            gpu_watchdog_timer = 0;
         }
         else
         {
@@ -312,11 +217,8 @@ xptClient_t* xptMiner_initateNewXptConnectionObject()
     xptClient_t* xptClient = xptClient_create();
     if( xptClient == NULL )
         return NULL;
-    // set developer fees
-    // up to 8 fee entries can be set
-    // the fee base is always calculated from 100% of the share value
-    // for example if you setup two fee entries with 3% and 2%, the total subtracted share value will be 5%
-    //xptClient_addDeveloperFeeEntry(xptClient, "MTq5EaAY9DvVXaByMEjJwVEhQWF1VVh7R8", getFeeFromDouble(2.5f));
+
+    // YPool developer fees go here
     return xptClient;
 }
 
@@ -337,6 +239,15 @@ void xptMiner_xptQueryWorkLoop()
     while( true )
     {
         uint32 currentTick = getTimeMilliseconds();
+
+        // GPU watchdog
+        if( gpu_watchdog_timer > 0 && (currentTick > gpu_watchdog_timer) && (currentTick - gpu_watchdog_timer) > (gpu_watchdog_max_wait * 1000) )
+        {
+            printf("Gave up after %d milliseconds\n", (currentTick - gpu_watchdog_timer));
+            printf("ERROR: Device timeout detected. It's been over %d seconds since we've heard back from the worker thread.\n", gpu_watchdog_max_wait);
+            exit(1);
+        }
+
         if( currentTick >= timerPrintDetails )
         {
             // print details only when connected
@@ -352,15 +263,18 @@ void xptMiner_xptQueryWorkLoop()
                     if( passedSeconds > 5 ) {
                         speedRate = (double)totalCollisionCount / (double)passedSeconds * 60.0;
                         tableRate = (double)totalTableCount / (double)passedSeconds * 60;
-                        printf("collisions/min: %.2lf (\xF1 %.1f%%), tables/min: %.2lf; Shares total: %ld (Valid: %ld, Invalid: %ld",
-                            speedRate, 100.0 / pow((double)totalTableCount, 0.5), tableRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+                        printf("collisions/min: %.2lf (%s %.1f%%), tables/min: %.2lf; Shares total: %ld (Valid: %ld, Invalid: %ld",
+                            speedRate, PLUS_MINUS, 100.0 / pow((double)totalTableCount, 0.5), tableRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+
+                        if ( passedSeconds > 900 ) {
+                            sharesPerHour = (double)curShareCount / (double)passedSeconds * 3600.0;
+                            printf(", PerHour: %.2f", sharesPerHour);
+                        }
+
+                        printf(")\n");
                     }
 
-                    if ( passedSeconds > 900 ) {
-                        sharesPerHour = (double)curShareCount / (double)passedSeconds * 3600.0;
-                        printf(", PerHour: %.2f", sharesPerHour);
-                    }
-                    printf(")\n");
+
                 }
 
             }
@@ -385,6 +299,7 @@ void xptMiner_xptQueryWorkLoop()
                     exit(-1);
                 }
 
+                bool prev_user_was_dev = cur_payout_info.is_developer;
                 payout_pos = (payout_pos + 1) % payout_list.size();
                 cur_payout_info = payout_list[payout_pos];
 
@@ -397,11 +312,12 @@ void xptMiner_xptQueryWorkLoop()
                 xptClient_connect(xptClient, &minerSettings.requestTarget);
 
                 double mining_length = (cur_payout_info.payout_pct * (double)payout_len) / 1000.0;
-                printf("\n");
                 if (cur_payout_info.is_developer) {
-                    printf("Mining for approx %.0f seconds to support future development\n", mining_length);
+                    if (!prev_user_was_dev) {
+                        printf("\nMining for a few moments to support future development\n", mining_length);
+                    }
                 } else {
-                    printf("Mining shiny coins for the user!\n");
+                    printf("\nMining shiny coins for the user!\n");
                 }
 
                 cur_payout_round_length = 0;
@@ -549,28 +465,28 @@ void xptMiner_xptQueryWorkLoop()
 
 void xptMiner_printHelp()
 {
-    puts("Usage: xptMiner.exe [options]");
-    puts("General options:");
-    puts("   -o, -O               The miner will connect to this url");
-    puts("                        You can specify a port after the url using -o url:port");
-    puts("   -u                   The username (workername) used for login");
-    puts("   -p                   The password used for login");
-    puts("   -t <num>             The number of threads for mining (default is 1)");
-    puts("   -f <num>             Donation amount for dev (default donates 3.0% to dev)");
-    puts("");
-    puts("Mining options:");
-    puts("   -d <num>,<num>,...   List of GPU devices to use (default is 0).");
-    puts("   -w <num>             GPU work group size (0 = MAX, default is 0, must be power of 2)");
-    puts("   -v <num>             Vector size (values = 1, 2, 4; default is 1)");
-    puts("   -b <num>             Number of buckets to use in hashing step");
-    puts("                        Uses 2^N buckets (range = 12 to 99, default is 27)");
-    puts("   -s <num>             Size of buckets to use (0 = MAX, default is 1)");
-    puts("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"");
-    puts("                        (Leave unset if using \"-s\" option)");
-    puts("   -n <num>             Use N bits for nonce storage (range = 10 to 26, default is 26)");
-    puts("");
-    puts("Example usage:");
-    puts("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0");
+    printf("Usage: xptMiner.exe [options]                                                          \n");
+    printf("General options:                                                                       \n");
+    printf("   -o, -O               The miner will connect to this url                             \n");
+    printf("                        You can specify a port after the url using -o url:port         \n");
+    printf("   -u                   The username (workername) used for login                       \n");
+    printf("   -p                   The password used for login                                    \n");
+    printf("   -t <num>             The number of threads for mining (default is 1)                \n");
+    printf("   -f <num>             Donation amount for dev (default donates 3.0% to dev)          \n");
+    printf("                                                                                       \n");
+    printf("Mining options:                                                                        \n");
+    printf("   -d <num>,<num>,...   List of GPU devices to use (default is 0).                     \n");
+    printf("   -w <num>             GPU work group size (0 = MAX, default is 0, must be power of 2)\n");
+    printf("   -v <num>             Vector size (values = 1, 2, 4; default is 1)                   \n");
+    printf("   -b <num>             Number of buckets to use in hashing step                       \n");
+    printf("                        Uses 2^N buckets (range = 12 to 99, default is 27)             \n");
+    printf("   -s <num>             Size of buckets to use (0 = MAX, default is 1)                 \n");
+    printf("   -m <num>             Target memory usage in Megabytes, overrides \"-s\"             \n");
+    printf("                        (Leave unset if using \"-s\" option)                           \n");
+    printf("   -n <num>             Use N bits for nonce storage (range = 10 to 26, default is 26) \n");
+    printf("                                                                                       \n");
+    printf("Example usage:                                                                         \n");
+    printf("  xptminer.exe -o ypool.net -u workername.pts_1 -p pass -d 0                           \n");
 }
 
 void xptMiner_parseCommandline(int argc, char **argv)
@@ -806,6 +722,10 @@ void xptMiner_parseCommandline(int argc, char **argv)
 
 int main(int argc, char** argv)
 {
+    // For some reason the full buffering and newline buffering causes major issues.
+    // For example, redirecting to file or piping to elsewhere results in no output.
+    setvbuf(stdout, NULL, _IONBF, 1024);
+
     commandlineInput.host = "ypool.net";
     srand(getTimeMilliseconds());
     commandlineInput.port = 8080 + (rand()%8); // use random port between 8080 and 8087
@@ -847,36 +767,33 @@ int main(int argc, char** argv)
     commandlineInput.numThreads = std::min(std::max(commandlineInput.numThreads, 1), 4);
     xptMiner_parseCommandline(argc, argv);
     minerSettings.protoshareMemoryMode = commandlineInput.ptsMemoryMode;
-    printf("\xC9\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBB\n");
-    printf("\xBA                                                  \xBA\n");
-    printf("\xBA  xptMiner (v1.1) + GPU Protoshare Miner (v0.1g)  \xBA\n");
-    printf("\xBA  Author: GigaWatt (GPU Code)                     \xBA\n");
-    printf("\xBA          Girino   (GPU Code)                     \xBA\n");
-    printf("\xBA          jh00     (xptMiner)                     \xBA\n");
-    printf("\xBA                                                  \xBA\n");
-    printf("\xBA  Please donate:                                  \xBA\n");
-    printf("\xBA      GigaWatt:                                   \xBA\n");
-    printf("\xBA      PTS: PbwHkEs9ieWdfJPsowoWingrKyND2uML9s     \xBA\n");
-    printf("\xBA      BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV     \xBA\n");
-    printf("\xBA                                                  \xBA\n");
-    printf("\xBA      Girino:                                     \xBA\n");
-    printf("\xBA      PTS: PkyeQNn1yGV5psGeZ4sDu6nz2vWHTujf4h     \xBA\n");
-    printf("\xBA      BTC: 1GiRiNoKznfGbt8bkU1Ley85TgVV7ZTXce     \xBA\n");
-    printf("\xBA                                                  \xBA\n");
-    printf("\xC8\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBC\n");
+    printf("/==================================================\\\n");
+    printf("|                                                  |\n");
+    printf("|  xptMiner (v1.1) + GPU Protoshare Miner (v0.1g)  |\n");
+    printf("|  Author: GigaWatt (GPU Code)                     |\n");
+    printf("|          Girino   (GPU Code)                     |\n");
+    printf("|          jh00     (xptMiner)                     |\n");
+    printf("|                                                  |\n");
+    printf("|  Please donate:                                  |\n");
+    printf("|      GigaWatt:                                   |\n");
+    printf("|      PTS: PbwHkEs9ieWdfJPsowoWingrKyND2uML9s     |\n");
+    printf("|      BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV     |\n");
+    printf("|                                                  |\n");
+    printf("|      Girino:                                     |\n");
+    printf("|      PTS: PkyeQNn1yGV5psGeZ4sDu6nz2vWHTujf4h     |\n");
+    printf("|      BTC: 1GiRiNoKznfGbt8bkU1Ley85TgVV7ZTXce     |\n");
+    printf("|                                                  |\n");
+    printf("\\==================================================/\n");
     printf("Launching miner...\n");
-    uint32 mbTable[] = {512,256,128,32,8};
-    //printf("Using %d megabytes of memory per thread\n", mbTable[min(commandlineInput.ptsMemoryMode,(sizeof(mbTable)/sizeof(mbTable[0])))]);
     printf("Using %d threads\n", commandlineInput.numThreads);
     printf("\n");
 
-#ifdef _WIN32
     // set priority to below normal
     SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
     // init winsock
     WSADATA wsa;
     WSAStartup(MAKEWORD(2,2),&wsa);
-#endif
+
     // get IP of pool url (default ypool.net)
     char* poolURL = commandlineInput.host;
     // Convert to lowercase
@@ -941,7 +858,7 @@ int main(int argc, char** argv)
     double total_payout = 100.00;
 
     // Add GigaWatt to developer fee payout
-    payout_temp.workername = (strstr(poolURL, "ypool") ? "gigawatt.pts_dev" : "PbwHkEs9ieWdfJPsowoWingrKyND2uML9s");
+    payout_temp.workername = _strdup(strstr(poolURL, "ypool") != NULL ? "gigawatt.pts_dev" : "PbwHkEs9ieWdfJPsowoWingrKyND2uML9s");
     payout_temp.workerpass = "x";
     payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
     payout_temp.is_developer = true;
@@ -949,7 +866,7 @@ int main(int argc, char** argv)
     payout_list.push_back( payout_temp );
 
     // Add Girino to developer fee payout
-    payout_temp.workername = (strstr(poolURL, "ypool") ? "girino.pts_dev" : "Pr7StLq25Z9nzJ3cG4QNxMwrw9rpid29Py");
+    payout_temp.workername = _strdup(strstr(poolURL, "ypool") != NULL ? "girino.pts_dev" : "Pr7StLq25Z9nzJ3cG4QNxMwrw9rpid29Py");
     payout_temp.workerpass = "x";
     payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
     payout_temp.is_developer = true;
@@ -965,22 +882,10 @@ int main(int argc, char** argv)
 
 
     // start miner threads
-#ifndef _WIN32
-
-    pthread_t threads[commandlineInput.numThreads];
-    pthread_attr_t threadAttr;
-    pthread_attr_init(&threadAttr);
-    // Set the stack size of the thread
-    pthread_attr_setstacksize(&threadAttr, 120*1024);
-    // free resources of thread upon return
-    pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
-#endif
-    for(uint32 i=0; i<commandlineInput.numThreads; i++)
-#ifdef _WIN32
+    for(uint32 i=0; i<commandlineInput.numThreads; i++) {
         CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)xptMiner_minerThread, (LPVOID)0, 0, NULL);
-#else
-        pthread_create(&threads[i], &threadAttr, xptMiner_minerThread, (void *)i);
-#endif
+    }
+
     // enter work management loop
     xptMiner_xptQueryWorkLoop();
     return 0;

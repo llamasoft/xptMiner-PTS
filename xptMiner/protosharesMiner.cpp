@@ -5,17 +5,21 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "momentumOpenCL.hpp";
+
 #define MAX_NONCE_BITS          ( 26 )
-#define MAX_MOMENTUM_NONCE		(1 << MAX_NONCE_BITS)
+#define MAX_MOMENTUM_NONCE		( 1 << MAX_NONCE_BITS )
 #define SEARCH_SPACE_BITS		( 50 )
 #define BIRTHDAYS_PER_HASH		( 8 )
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 // #define NOSUBMIT
 
+uint32 totalOverhead   = 0;
 uint32 totalHashTime   = 0;
 uint32 totalInsertTime = 0;
 uint32 totalResetTime  = 0;
+extern uint32 gpu_watchdog_max_wait;
 
 #define SWAP64(n)               \
     (  ((n)               << 56) \
@@ -58,7 +62,7 @@ double poisson_estimate(double buckets, double items, double bucket_size) {
 
 
 size_t calc_hash_mem_usage() { return sizeof(cl_ulong) * MAX_MOMENTUM_NONCE; }
-size_t calc_map_mem_usage(uint32 buckets_log2, uint32 bucket_size) { return sizeof(cl_uint) * (1 << buckets_log2) * bucket_size; }
+size_t calc_map_mem_usage(uint32 buckets_log2, uint32 bucket_size) { return sizeof(cl_uint) * ((uint64)1 << buckets_log2) * bucket_size; }
 
 size_t calc_total_mem_usage(uint32 buckets_log2, uint32 bucket_size) {
     return calc_hash_mem_usage() + calc_map_mem_usage(buckets_log2, bucket_size);
@@ -86,9 +90,9 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     uint64 birthdayB = resultHash[indexB&7] >> (64ULL-SEARCH_SPACE_BITS);
 
 #ifdef VERIFY_RESULTS
-    printf("DEBUG:\n");
-    printf(" Nonce A = %#010x; Hash A = %#018llx\n", indexA, birthdayA);
-    printf(" Nonce B = %#010x; Hash B = %#018llx\n", indexB, birthdayB);
+    printf("Nonce Pair:\n");
+    printf("    Nonce A = %#010x; Hash A = %#018llx\n", indexA, birthdayA);
+    printf("    Nonce B = %#010x; Hash B = %#018llx\n", indexB, birthdayB);
     printf("\n");
 #endif
 
@@ -129,7 +133,6 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     }
     if( hashMeetsTarget )
     {
-        //printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
         curShareCount++;
 #ifndef NOSUBMIT
@@ -163,7 +166,6 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     }
     if( hashMeetsTarget )
     {
-        // printf("[DEBUG] Submit Protoshares share\n");
         totalShareCount++;
         curShareCount++;
 #ifndef NOSUBMIT
@@ -179,7 +181,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
     printf("Initializing GPU %d\n", device_num);
     OpenCLMain &main = OpenCLMain::getInstance();
-    OpenCLDevice* device = main.getDevice(device_num);
+    this->device = main.getDevice(device_num);
 
 
     printf("======================================================================\n");
@@ -240,7 +242,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
     // Make sure we can allocate hash_list (cannot violate CL_DEVICE_MAX_MEM_ALLOC_SIZE)
     if (std::max(calc_hash_mem_usage(), calc_map_mem_usage(buckets_log2, bucket_size)) > device->getMaxMemAllocSize()) {
-        while (bucket_size > 0 && std::max(calc_hash_mem_usage(), calc_map_mem_usage(buckets_log2, bucket_size)) > device->getMaxMemAllocSize()) { bucket_size--; }
+        while (bucket_size > 0 && calc_map_mem_usage(buckets_log2, bucket_size) > device->getMaxMemAllocSize()) { bucket_size--; }
         if (bucket_size < 1) {
             printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
             printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
@@ -274,22 +276,30 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
     // Compile the OpenCL code
     printf("Compiling OpenCL code... this may take 3-5 minutes\n");
-    std::vector<std::string> file_list;
-    file_list.push_back("opencl/momentum.cl");
 
-    bool isAMD = (device->getVendor().find("Advanced Micro Devices") != std::string::npos);
+
     bool isGPU = device->isGPU();
+    if (!isGPU) { gpu_watchdog_max_wait *= 10; } // Effectively disable the watchdog
 
     std::stringstream params;
     params << " -I ./opencl/";
-    params << " -D DEVICE_AMD_GPU=" << (isGPU && isAMD ? 1 : 0);
+    params << " -D DEVICE_GPU=" << (isGPU ? 1 : 0);
     params << " -D VECT_TYPE=" << vect_type;
     params << " -D LOCAL_WGS=" << wgs;
     params << " -D NUM_BUCKETS_LOG2=" << buckets_log2;
     params << " -D BUCKET_SIZE=" << bucket_size;
     params << " -D NONCE_BITS=" << nonce_bits;
     params << " -D NONCE_GAP=" << (1 << (MAX_NONCE_BITS - nonce_bits));
+
+#ifdef USE_SOURCE
+    std::vector<std::string> file_list;
+    file_list.push_back("opencl/momentum.cl");
     OpenCLProgram* program = device->getContext()->loadProgramFromFiles(file_list, params.str());
+#else
+    std::vector<std::string> input_src;
+    input_src.push_back(getMomentumOpenCL());
+    OpenCLProgram* program = device->getContext()->loadProgramFromStrings(input_src, params.str());
+#endif
 
     kernel_hash   = program->getKernel("hash_step");
     kernel_insert = program->getKernel("insert_step");
@@ -312,9 +322,13 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 {
 
+#ifdef MEASURE_TIME
+    uint32 overhead = getTimeMilliseconds();
+#endif
+
     block->nonce = 0;
     uint32 target = *(uint32*)(block->targetShare+28);
-    OpenCLDevice* device = OpenCLMain::getInstance().getDevice(device_num);
+    // OpenCLDevice* device = OpenCLMain::getInstance().getDevice(device_num);
 
     uint32 midHash[8];
     // midHash = sha256(sha256(block))
@@ -405,23 +419,32 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     uint32 end = getTimeMilliseconds();
     uint32 warmup_skips = 3;
     if (totalTableCount > warmup_skips) { // Allow some warmup time
+        totalOverhead   += (overhead - begin);
         totalHashTime   += (hash_end-begin);
         totalInsertTime += (insert_end-hash_end);
         totalResetTime  += (end-insert_end);
     }
-    printf("Found %2d collisions in %4d ms (Hash: %4d ms, Insert: %4d ms, Reset: %4d ms)\n", result_qty * 2, (end-begin), (hash_end-begin), (insert_end-hash_end), (end-insert_end));
+    printf("Found %2d collisions in %4d ms (Hash: %4d ms, Insert: %4d ms, Reset: %4d ms, Overhead: %4d)\n",
+            result_qty * 2,
+            (end - begin),
+            (hash_end - begin),
+            (insert_end - hash_end),
+            (end - insert_end),
+            (overhead - begin));
 
     if (totalTableCount > 0 && totalTableCount % 10 == 0) {
-        printf("\nAVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d\n\n",
+        printf("\nAVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d, Overhead: %4d\n\n",
             (totalHashTime + totalInsertTime + totalResetTime) / (totalTableCount - warmup_skips),
             totalHashTime   / (totalTableCount - warmup_skips),
             totalInsertTime / (totalTableCount - warmup_skips),
-            totalResetTime  / (totalTableCount - warmup_skips));
+            totalResetTime  / (totalTableCount - warmup_skips),
+            totalOverhead   / (totalTableCount - warmup_skips));
     }
 #endif
 
-    for (int i = 0; i < result_qty; i++) {
+    for (uint32 i = 0; i < result_qty; i++) {
         protoshares_revalidateCollision(block, (uint8 *)midHash, result_a[i], result_b[i]);
     }
+
     totalTableCount++;
 }

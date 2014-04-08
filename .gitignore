@@ -1,5 +1,6 @@
 # Keep proprietary code set aside
-*.cl
+opencl/
+_unused/
 
 #################
 ## Eclipse

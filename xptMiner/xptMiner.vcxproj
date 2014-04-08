@@ -178,16 +178,14 @@
     <ClInclude Include="global.h" />
     <ClInclude Include="jhlib.h" />
     <ClInclude Include="algorithm.h" />
+    <ClInclude Include="momentumOpenCL.hpp" />
+    <ClInclude Include="openclobjects.h" />
     <ClInclude Include="protoshareMiner.h" />
-    <ClInclude Include="scrypt.h" />
     <ClInclude Include="aes_helper.h" />
     <ClInclude Include="sha2.h" />
-    <ClInclude Include="sph_keccak.h" />
-    <ClInclude Include="sph_metis.h" />
-    <ClInclude Include="sph_shavite.h" />
-    <ClInclude Include="sph_types.h" />
     <ClInclude Include="ticker.h" />
     <ClInclude Include="transaction.h" />
+    <ClInclude Include="win.h" />
     <ClInclude Include="xptClient.h" />
     <ClInclude Include="xptServer.h" />
   </ItemGroup>
@@ -196,16 +194,10 @@
     <ClCompile Include="jhlib.cpp" />
     <ClCompile Include="OpenCLObjects.cpp" />
     <ClCompile Include="protosharesMiner.cpp" />
-    <ClCompile Include="scrypt.cpp" />
-    <ClCompile Include="scryptMinerCPU.cpp" />
-    <ClCompile Include="primecoinMiner.cpp" />
-    <ClCompile Include="metiscoinMiner.cpp" />
-    <ClCompile Include="keccak.c" />
-    <ClCompile Include="metis.c" />
     <ClCompile Include="sha2.cpp" />
-    <ClCompile Include="shavite.c" />
     <ClCompile Include="ticker.cpp" />
     <ClCompile Include="transaction.cpp" />
+    <ClCompile Include="win.cpp" />
     <ClCompile Include="xptClient.cpp" />
     <ClCompile Include="xptClientPacketHandler.cpp" />
     <ClCompile Include="xptPacketbuffer.cpp" />

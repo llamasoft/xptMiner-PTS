@@ -1,14 +1,37 @@
 #ifndef __GLOBAL_H__
 #define __GLOBAL_H__
 
+// #define GLOBAL_DEBUG
+#ifdef GLOBAL_DEBUG
+    #define DEBUG(x) { x; }
+#else
+    #define DEBUG(x)
+#endif
+
 #include <algorithm>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <cstring>
+#include <ctime>
+#include <iomanip>
+#include <iostream>
+#include <set>
+#include <string>
+
+#include "OpenCLObjects.h"
+#include "algorithm.h"
+#include "jhlib.h"
+#include "sha2.h"
+#include "sha2.h"
+#include "transaction.h"
+
 #ifdef _WIN32
+#define _CRT_SECURE_NO_WARNINGS
 #define NOMINMAX
 #pragma comment(lib,"Ws2_32.lib")
-#include<Winsock2.h>
-#include<ws2tcpip.h>
+#include <Winsock2.h>
+#include <ws2tcpip.h>
 typedef __int64           sint64;
 typedef unsigned __int64  uint64;
 typedef __int32           sint32;
@@ -19,62 +42,25 @@ typedef unsigned __int16  uint16;
 //typedef unsigned __int8   uint8;
 
 //typedef __int8 int8_t;
-typedef unsigned __int8 uint8_t;
-typedef __int16 int16_t;
+typedef unsigned __int8  uint8_t;
+typedef __int16          int16_t;
 typedef unsigned __int16 uint16_t;
-typedef __int32 int32_t;
+typedef __int32          int32_t;
 typedef unsigned __int32 uint32_t;
-typedef __int64 int64_t;
+typedef __int64          int64_t;
 typedef unsigned __int64 uint64_t;
 
+#define PLUS_MINUS "\xF1"
 #else
-// Windows-isms for compatibility in Linux
-#define RtlZeroMemory(Destination,Length) std::memset((Destination),0,(Length))
-#define RtlCopyMemory(Destination,Source,Length) std::memcpy((Destination),(Source),(Length))
+// Cygwin specific tweak
+// #ifdef __CYGWIN__
+// #include <cstdlib>
+// #endif
 
-#ifdef __CYGWIN__
-#include <cstdlib>
+// Include the Windows/Linux compatability header
+#include "win.h"
+#define PLUS_MINUS "\u00B1"
 #endif
-#define _strdup(duration) strdup(duration)
-#define Sleep(ms) usleep(1000*ms)
-#define strcpy_s(dest,val,src) strncopy(dest,src,val)
-#define __debugbreak(); raise(SIGTRAP);
-#define CRITICAL_SECTION pthread_mutex_t
-#define EnterCriticalSection(Section) pthread_mutex_unlock(Section)
-#define LeaveCriticalSection(Section) pthread_mutex_unlock(Section)
-#define InitializeCriticalSection(Section) pthread_mutex_init(Section, NULL)
-
-// lazy workaround
-typedef int SOCKET;
-typedef struct sockaddr_in SOCKADDR_IN;
-typedef struct sockaddr SOCKADDR;
-#define SOCKET_ERROR -1
-#define closesocket close
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <sys/fcntl.h>
-#include <unistd.h>
-#include <signal.h>
-#include <pthread.h>
-
-#endif
-#include <iostream>
-
-#include<stdio.h>
-#include<time.h>
-#include<stdlib.h>
-#include<set>
-
-#include <iomanip>
-#include"sha2.h"
-
-#include"jhlib.h" // slim version of jh library
-
-#include "OpenCLObjects.h"
 
 // connection info for xpt
 typedef struct  
@@ -86,15 +72,12 @@ typedef struct
     float donationPercent;
 }generalRequestTarget_t;
 
-#include"xptServer.h"
-#include"xptClient.h"
+#include "xptServer.h"
+#include "xptClient.h"
 
-#include"sha2.h"
-#include"sph_keccak.h"
-#include"sph_metis.h"
-#include"sph_shavite.h"
+#include "sha2.h"
 
-#include"transaction.h"
+#include "transaction.h"
 
 // global settings for miner
 typedef struct  
@@ -219,10 +202,6 @@ typedef struct
     bool is_developer;
 } payout_t;
 
-
-#include "scrypt.h"
-#include "algorithm.h"
-
 void xptMiner_submitShare(minerProtosharesBlock_t* block);
 void xptMiner_submitShare(minerScryptBlock_t* block);
 void xptMiner_submitShare(minerPrimecoinBlock_t* block);
@@ -235,7 +214,6 @@ extern volatile uint32 totalShareCount;
 extern volatile uint32 curShareCount;
 extern volatile uint32 invalidShareCount;
 extern volatile uint32 monitorCurrentBlockHeight;
-
 
 extern std::vector<payout_t> payout_list;
 

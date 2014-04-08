@@ -105,7 +105,6 @@ bool xptClient_connect(xptClient_t* xptClient, generalRequestTarget_t* target)
 	// reset old work info
 	memset(&xptClient->blockWorkInfo, 0x00, sizeof(xptBlockWorkInfo_t));
 
-    // Suppress initial login, let deverloper fee rotation handle this
 	xptClient_sendWorkerLogin(xptClient);
 
 	// mark as connected
@@ -479,19 +478,37 @@ void xptClient_sendPing(xptClient_t* xptClient)
  */
 bool xptClient_processPacket(xptClient_t* xptClient)
 {
-	// printf("Received packet with opcode %d and size %d\n", xptClient->opcode, xptClient->recvSize+4);
-	if( xptClient->opcode == XPT_OPC_S_AUTH_ACK )
-		return xptClient_processPacket_authResponse(xptClient);
-	else if( xptClient->opcode == XPT_OPC_S_WORKDATA1 )
-		return xptClient_processPacket_blockData1(xptClient);
-	else if( xptClient->opcode == XPT_OPC_S_SHARE_ACK )
-		return xptClient_processPacket_shareAck(xptClient);
-	else if( xptClient->opcode == XPT_OPC_S_MESSAGE )
-		return xptClient_processPacket_message(xptClient);
-	else if( xptClient->opcode == XPT_OPC_S_PING )
-		return xptClient_processPacket_ping(xptClient);
-	// unknown opcodes are accepted too, for later backward compatibility
-	return true;
+    bool rtn = false;
+    char packet_op[64];
+
+    if( xptClient->opcode == XPT_OPC_S_AUTH_ACK ) {
+        sprintf(packet_op, "XPT_OPC_S_AUTH_ACK");
+        rtn = xptClient_processPacket_authResponse(xptClient);
+    
+    } else if( xptClient->opcode == XPT_OPC_S_WORKDATA1 ) {
+        sprintf(packet_op, "XPT_OPC_S_WORKDATA1");
+        rtn = xptClient_processPacket_blockData1(xptClient);
+    
+    } else if( xptClient->opcode == XPT_OPC_S_SHARE_ACK ) {
+        sprintf(packet_op, "XPT_OPC_S_SHARE_ACK");
+        rtn = xptClient_processPacket_shareAck(xptClient);
+    
+    } else if( xptClient->opcode == XPT_OPC_S_MESSAGE ) {
+        sprintf(packet_op, "XPT_OPC_S_MESSAGE");
+        rtn = xptClient_processPacket_message(xptClient);
+    
+    } else if( xptClient->opcode == XPT_OPC_S_PING ) {
+        sprintf(packet_op, "XPT_OPC_S_PING");
+        rtn = xptClient_processPacket_ping(xptClient);
+    
+    } else {
+        // unknown opcodes are accepted too, for later backward compatibility
+        sprintf(packet_op, "XPT_OPC_S_UNKNOWN_%08X", xptClient->opcode);
+        rtn = true;
+    }
+
+    DEBUG( printf("DEBUG: Got %s packet, RTN = %s\n", packet_op, (rtn ? "TRUE" : "FALSE")) );
+    return rtn;
 }
 
 /*

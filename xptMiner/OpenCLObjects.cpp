@@ -106,20 +106,11 @@ void print_err_msg(cl_int err_code) {
 void CL_CALLBACK error_callback_func (const char *errinfo,
     const void *private_info, size_t cb,
     void *user_data) {
-#ifdef DEBUG
-        std::cerr << "ERROR (callback): " << errinfo << std::endl;
-#endif
+    std::cerr << "ERROR (callback): " << errinfo << std::endl;
 }
 
 OpenCLPlatform::OpenCLPlatform(cl_platform_id id, cl_device_type device_type) {
     my_id = id;
-    // debug
-#ifdef DEBUG
-    char name[128];
-    check_error(clGetPlatformInfo(my_id, CL_PLATFORM_NAME, 128 * sizeof(char), name,
-        NULL));
-    fprintf(stdout, "Platform: %s\n", name);
-#endif
 
     // devices;
     cl_uint num_devices;
@@ -185,13 +176,6 @@ OpenCLPlatform* OpenCLMain::getPlatform(int pos) {
 OpenCLDevice::OpenCLDevice(cl_device_id _id, OpenCLPlatform* _parent) {
     my_id = _id;
     parent = _parent;
-    // debug
-#ifdef DEBUG
-    char name[128];
-    check_error(clGetDeviceInfo(my_id, CL_DEVICE_NAME, 128 * sizeof(char), name,
-        NULL));
-    fprintf(stdout, "  Device: %s\n", name);
-#endif
 
     // inits kernels or whatever...
     context = NULL; // lazy instantiation
@@ -313,7 +297,8 @@ int OpenCLDevice::getMaxWorkItemDimensions() {
 
 bool OpenCLDevice::isGPU() {
     cl_device_type value;
-    check_error(clGetDeviceInfo(my_id, CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, (sizeof(cl_device_type)), &value, NULL));
+    check_error(clGetDeviceInfo(my_id, CL_DEVICE_TYPE, (sizeof(cl_device_type)), &value, NULL));
+
     return (value & CL_DEVICE_TYPE_GPU > 0);
 }
 
