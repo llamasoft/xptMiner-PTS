@@ -21,6 +21,8 @@ LIBS = -lpthread
 
 ifeq ($(OSVERSION),Linux)
 	LIBS += -lrt -lOpenCL
+	LIBPATHS += -L/opt/AMDAPP/x86
+	INCLUDEPATHS += -I/opt/AMDAPP/include/CL 
 	CFLAGS += -march=native
 	CXXFLAGS += -march=native
 endif
