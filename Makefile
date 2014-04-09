@@ -72,13 +72,6 @@ OBJS = \
 	xptMiner/sha2.o \
 	xptMiner/xptClient.o \
 	xptMiner/protosharesMiner.o \
-	xptMiner/primecoinMiner.o \
-	xptMiner/keccak.o \
-	xptMiner/metis.o \
-	xptMiner/shavite.o \
-	xptMiner/metiscoinMiner.o \
-	xptMiner/scrypt.o \
-	xptMiner/scryptMinerCPU.o \
 	xptMiner/xptClientPacketHandler.o \
 	xptMiner/xptPacketbuffer.o \
 	xptMiner/xptServer.o \
