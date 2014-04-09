@@ -78,6 +78,7 @@ OBJS = \
 	xptMiner/xptServerPacketHandler.o \
 	xptMiner/transaction.o \
 	xptMiner/OpenCLObjects.o \
+	xptMiner/win.o \
 
 all: xptminer$(EXTENSION)
 
