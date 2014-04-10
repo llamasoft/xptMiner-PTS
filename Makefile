@@ -18,11 +18,14 @@ CFLAGS = -Wall -Wextra -O2 -fomit-frame-pointer
 
 
 LIBS = -lpthread
+# You might need to edit these paths too
+LIBPATHS = -L/usr/local/lib -L/usr/lib
+INCLUDEPATHS = -I/usr/local/include -I/usr/include -IxptMiner/includes/
 
 ifeq ($(OSVERSION),Linux)
 	LIBS += -lrt -lOpenCL
-	LIBPATHS += -L/opt/AMDAPP/x86
-	INCLUDEPATHS += -I/opt/AMDAPP/include/CL 
+	LIBPATHS += -L/opt/AMDAPP/lib/x86
+	INCLUDEPATHS += -I/opt/AMDAPP/include 
 	CFLAGS += -march=native
 	CXXFLAGS += -march=native
 endif
@@ -33,10 +36,6 @@ ifeq ($(OSVERSION),FreeBSD)
 	CFLAGS += -DHAVE_DECL_LE32DEC -march=native
 	CXXFLAGS += -DHAVE_DECL_LE32DEC -march=native
 endif
-
-# You might need to edit these paths too
-LIBPATHS = -L/usr/local/lib -L/usr/lib
-INCLUDEPATHS = -I/usr/local/include -I/usr/include -IxptMiner/includes/
 
 ifeq ($(OSVERSION),Darwin)
 	LIBS += -framework OpenCL
