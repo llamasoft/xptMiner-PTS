@@ -1,0 +1,111 @@
+                                  USAGE AND TUNING GUIDE
+==========================================================================================
+
+Introducing the xptMiner-PTS, the high performance OpenCL Protoshare miner!
+Brought to you by:
+    GigaWatt (GPU code and optimizations)
+    Girino (original GPU code and OpenCL libraries)
+    jh00 (original mining code)
+
+Donations are very appreciated!
+
+GigaWatt:
+    PTS: PbwHkEs9ieWdfJPsowoWingrKyND2uML9s
+    BTC: 1E2egHUcLDAmcxcqZqpL18TPLx9Xj1akcV
+Girino:
+    PTS: PkyeQNn1yGV5psGeZ4sDu6nz2vWHTujf4h
+    BTC: 1GiRiNoKznfGbt8bkU1Ley85TgVV7ZTXce
+
+
+Source code for this application is availble from the Github page at:
+https://github.com/llamasoft/xptMiner-PTS/
+
+
+Usage Overview
+================
+General options:
+   -o, -O               The miner will connect to this url
+                        You can specify a port after the url using -o url:port
+   -u                   The username (workername) used for login
+   -p                   The password used for login
+   -t <num>             The number of threads for mining (default is 1)
+   -f <num>             Donation amount for dev (default donates 3.0 to dev)
+
+Mining options:
+   -d <num>,<num>,...   List of GPU devices to use (default is 0).
+   -w <num>             GPU work group size (0 = MAX, default is 0, must be power of 2)
+   -v <num>             Vector size (values = 1, 2, 4; default is 1)
+   -b <num>             Number of buckets to use in hashing step
+                        Uses 2^N buckets (range = 12 to 99, default is 27)
+   -s <num>             Size of buckets to use (0 = MAX, default is 1)
+   -m <num>             Target memory usage in Megabytes, overrides "-s"
+                        (Leave unset if using "-s" option)
+   -n <num>             Use N bits for nonce storage (range = 10 to 26, default is 26)
+
+Examples:
+    Mining on YPool.net:
+    xptminer -o ypool.net:8080 -u username.worker -p pass -b 27 -s 2
+
+    Mining on 1GH.com:
+    xptminer -o ptspool.1gh.com:18120 -u PAYOUTADDRESS -p anything -b 26 -s 4
+
+    Mining on PTSPool.com:
+    xptminer -o 112.124.13.238:28988 -u PAYOUTADDRESS -p anything -b 28 -s 1
+
+
+This program uses a large amount of memory in order to mine efficiently.
+The total amount of required memory in Megabytes is determined by the "-b" and "-s" options:
+
+         |    -s 1     -s 2     -s 3     -s 4     -s 5     -s 6     -s 7
+---------+--------------------------------------------------------------
+   -b 22 |     528      544      560      576      592      608      624
+   -b 23 |     544      576      608      640      672      704      736
+   -b 24 |     576      640      704      768      832      896      960
+   -b 25 |     640      768      896    1,024    1,152    1,280    1,408
+   -b 26 |     768    1,024    1,280    1,536    1,792    2,048    2,304
+   -b 27 |   1,024    1,536    2,048    2,560    3,072    3,584    4,096
+   -b 28 |   1,536    2,560    3,584    4,608    5,632    6,656    7,680
+   -b 29 |   2,560    4,608    6,656    8,704   10,752   12,800   14,848
+   -b 30 |   4,608    8,704   12,800   16,896   20,992   25,088   29,184
+
+(The exact formula is M = 512 + ((2^B * S) / 262144).)
+
+
+Performance Tuning
+====================
+Finding the optimal configuration set for your mining setup is absolutely critical!  It means the difference
+between mediocre performance and fantastic performance.  What works for one user may not well work for you,
+so don't expect there to be a "magic bullet" that's always gives the best results for everybody.
+
+Before we begin, consider installing the most recent drivers for your hardware and rebooting your system.
+This will ensure that you're working from a clean state with as little performance interference as possible.
+In addition, you'll need to know the amount of memory that your mining hardware has available.
+To make sure that you're using all of it, I recommend setting the GPU_MAX_ALLOC_PERCENT environment variable to 100.
+On Linux systems, the command will be "export GPU_MAX_ALLOC_PERCENT=100".
+On Windows systems, the command will be "setx GPU_MAX_ALLOC_PERCENT 100".
+
+Lastly, be sure to test only one device at a time and for at least 10 minutes on each setting.
+Failure to do so *will* result in inaccurate performance measurements.
+
+1) Using the table listed above, look down the "-s 1" column to find the largest value of "-b"
+   that's less than or equal to the amount of memory that your GPU has available.
+   For example, if your GPU has 2048 MB of memory, "-b 28" is the highest.
+   Run the miner and write down the collisions/minute value.
+
+2) Lower the value of "-b" by one and find the largest "-s" value that's less
+   than or equal to the amount of memory that your GPU has available.
+   For example: if your GPU has 2048 MB of memory, "-b 27 -s 3" is the next trial.
+   Run the miner and write down the results.
+
+3) Leaving "-b" set to the value from step 2, continue trying configurations by decreasing the value of "-s" by one.
+   For example: if your GPU has 2048 MB of memory, try "-b 27 -s 2" followed by "-b 27 -s 1".
+
+4) Repeat steps 2 and 3 a few more times.  Note your best configuration for "-b" and "-s".
+
+5) Taking the best configuration from step 4, try lowing the value of "-n" by one starting from 26.
+   On the first trial that's worse than your best configuration, stop.
+   For example: try adding "-n 25", if it's better then try "-n 24" instead, etc.
+
+[optional] 6) Try also adding the "-v 2" or "-v 4" options.
+
+Congratulations!  You've found the best configuration for your mining setup!

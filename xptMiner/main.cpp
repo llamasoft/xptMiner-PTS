@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
-#define MAX_TRANSACTIONS	(4096)
+#define MAX_TRANSACTIONS    (4096)
 
 // miner version string (for pool statistic)
 char* minerVersionString = "xptMiner-PTS 1.2gg";
@@ -24,36 +24,35 @@ minerSettings_t minerSettings = {0};
 xptClient_t* xptClient = NULL;
 CRITICAL_SECTION cs_xptClient;
 
-struct  
-{
+struct {
     CRITICAL_SECTION cs_work;
 
-    uint32	algorithm;
+    uint32  algorithm;
     // block data
-    uint32	version;
-    uint32	height;
-    uint32	nBits;
-    uint32	timeBias;
-    uint8	merkleRootOriginal[32]; // used to identify work
-    uint8	prevBlockHash[32];
-    uint8	target[32];
-    uint8	targetShare[32];
+    uint32  version;
+    uint32  height;
+    uint32  nBits;
+    uint32  timeBias;
+    uint8   merkleRootOriginal[32]; // used to identify work
+    uint8   prevBlockHash[32];
+    uint8   target[32];
+    uint8   targetShare[32];
     // extra nonce info
-    uint8	coinBase1[1024];
-    uint8	coinBase2[1024];
-    uint16	coinBase1Size;
-    uint16	coinBase2Size;
+    uint8   coinBase1[1024];
+    uint8   coinBase2[1024];
+    uint16  coinBase1Size;
+    uint16  coinBase2Size;
     // transaction hashes
-    uint8	txHash[32*MAX_TRANSACTIONS];
-    uint32	txHashCount;
-}workDataSource;
+    uint8   txHash[32 * MAX_TRANSACTIONS];
+    uint32  txHashCount;
+} workDataSource;
 
 uint32 uniqueMerkleSeedGenerator = 0;
 uint32 miningStartTime = 0;
 
 // GPU watchdog to detect Windows TDR or hangs.
 // Maximum wait extended by 2x if mining on CPU.
-uint32 gpu_watchdog_max_wait = 5;
+uint32 gpu_watchdog_max_wait = 10;
 uint32 gpu_watchdog_timer = 0;
 
 std::vector<ProtoshareOpenCL *> gpu_processors;
@@ -61,8 +60,10 @@ std::vector<payout_t> payout_list;
 
 commandlineInput_t commandlineInput;
 
-uint32 nearest_pow2(uint32 n) {
+uint32 nearest_pow2(uint32 n)
+{
     uint32 temp = 1;
+
     while (n > 0) { temp <<= 1; n >>= 1; }
 
     return temp >> 1;
@@ -76,12 +77,13 @@ void xptMiner_submitShare(minerProtosharesBlock_t* block)
 {
     printf("Share found! (NonceA: %#010x, NonceB: %#010x, Blockheight: %d)\n", block->birthdayA, block->birthdayB, block->height);
     EnterCriticalSection(&cs_xptClient);
-    if( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true )
-    {
+
+    if ( xptClient == NULL || xptClient_isDisconnected(xptClient, NULL) == true ) {
         printf("Share submission failed - No connection to server\n");
         LeaveCriticalSection(&cs_xptClient);
         return;
     }
+
     // submit block
     xptShareToSubmit_t* xptShare = (xptShareToSubmit_t*)malloc(sizeof(xptShareToSubmit_t));
     memset(xptShare, 0x00, sizeof(xptShareToSubmit_t));
@@ -115,20 +117,18 @@ void *xptMiner_minerThread(void *arg)
     minerProtosharesBlock_t minerProtosharesBlock = {0};
     minerScryptBlock_t minerScryptBlock = {0};
     minerMetiscoinBlock_t minerMetiscoinBlock = {0};
-    minerPrimecoinBlock_t minerPrimecoinBlock = {0}; 
+    minerPrimecoinBlock_t minerPrimecoinBlock = {0};
     ProtoshareOpenCL *processor = gpu_processors.back();
     gpu_processors.pop_back();
 
     // todo: Eventually move all block structures into a union to save stack size
-    while( true )
-    {
+    while ( true ) {
         // has work?
         bool hasValidWork = false;
         EnterCriticalSection(&workDataSource.cs_work);
-        if( workDataSource.height > 0 )
-        {
-            if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
-            {
+
+        if ( workDataSource.height > 0 ) {
+            if ( workDataSource.algorithm == ALGORITHM_PROTOSHARES ) {
                 // get protoshares work data
                 minerProtosharesBlock.version = workDataSource.version;
                 minerProtosharesBlock.nTime = (uint32)time(NULL) + workDataSource.timeBias;
@@ -142,29 +142,29 @@ void *xptMiner_minerThread(void *arg)
                 uniqueMerkleSeedGenerator++;
                 // generate merkle root transaction
                 bitclient_generateTxHash(sizeof(uint32), (uint8*)&minerProtosharesBlock.uniqueMerkleSeed, workDataSource.coinBase1Size, workDataSource.coinBase1, workDataSource.coinBase2Size, workDataSource.coinBase2, workDataSource.txHash);
-                bitclient_calculateMerkleRoot(workDataSource.txHash, workDataSource.txHashCount+1, minerProtosharesBlock.merkleRoot);
+                bitclient_calculateMerkleRoot(workDataSource.txHash, workDataSource.txHashCount + 1, minerProtosharesBlock.merkleRoot);
                 hasValidWork = true;
             }
         }
+
         LeaveCriticalSection(&workDataSource.cs_work);
-        if( hasValidWork == false )
-        {
+
+        if ( hasValidWork == false ) {
             Sleep(1);
             continue;
         }
+
         // valid work data present, start processing workload
-        if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
-        {
+        if ( workDataSource.algorithm == ALGORITHM_PROTOSHARES ) {
             gpu_watchdog_timer = getTimeMilliseconds();
             processor->protoshare_process(&minerProtosharesBlock);
             gpu_watchdog_timer = 0;
-        }
-        else
-        {
+        } else {
             printf("xptMiner_minerThread(): Unknown algorithm\n");
             Sleep(5000); // dont spam the console
         }
     }
+
     delete processor;
     return 0;
 }
@@ -191,15 +191,17 @@ void xptMiner_getWorkFromXPTConnection(xptClient_t* xptClient)
     memcpy(workDataSource.coinBase2, xptClient->blockWorkInfo.coinBase2, xptClient->blockWorkInfo.coinBase2Size);
 
     // get hashes
-    if( xptClient->blockWorkInfo.txHashCount > MAX_TRANSACTIONS )
-    {
-        printf("Too many transaction hashes\n"); 
+    if ( xptClient->blockWorkInfo.txHashCount > MAX_TRANSACTIONS ) {
+        printf("Too many transaction hashes\n");
         workDataSource.txHashCount = 0;
-    }
-    else
+    } else {
         workDataSource.txHashCount = xptClient->blockWorkInfo.txHashCount;
-    for(uint32 i=0; i<xptClient->blockWorkInfo.txHashCount; i++)
-        memcpy(workDataSource.txHash+32*(i+1), xptClient->blockWorkInfo.txHashes+32*i, 32);
+    }
+
+    for (uint32 i = 0; i < xptClient->blockWorkInfo.txHashCount; i++) {
+        memcpy(workDataSource.txHash + 32 * (i + 1), xptClient->blockWorkInfo.txHashes + 32 * i, 32);
+    }
+
     // set blockheight last since it triggers reload of work
     workDataSource.height = xptClient->blockWorkInfo.height;
 
@@ -215,8 +217,10 @@ void xptMiner_getWorkFromXPTConnection(xptClient_t* xptClient)
 xptClient_t* xptMiner_initateNewXptConnectionObject()
 {
     xptClient_t* xptClient = xptClient_create();
-    if( xptClient == NULL )
+
+    if ( xptClient == NULL ) {
         return NULL;
+    }
 
     // YPool developer fees go here
     return xptClient;
@@ -228,7 +232,7 @@ void xptMiner_xptQueryWorkLoop()
     xptClient = xptMiner_initateNewXptConnectionObject();
 
     uint32 timerPrintDetails = getTimeMilliseconds() + 8000;
-    
+
     uint8 payout_pos = payout_list.size() - 1;
     uint32 payout_len = 35 * 1000; // Amount of milliseconds per 1% donation
 
@@ -236,35 +240,31 @@ void xptMiner_xptQueryWorkLoop()
     bool load_next_user = true;
     uint32 cur_payout_round_length = 0;
 
-    while( true )
-    {
+    while ( true ) {
         uint32 currentTick = getTimeMilliseconds();
 
         // GPU watchdog
-        if( gpu_watchdog_timer > 0 && (currentTick > gpu_watchdog_timer) && (currentTick - gpu_watchdog_timer) > (gpu_watchdog_max_wait * 1000) )
-        {
+        if ( gpu_watchdog_timer > 0 && (currentTick > gpu_watchdog_timer) && (currentTick - gpu_watchdog_timer) > (gpu_watchdog_max_wait * 1000) ) {
             printf("Gave up after %d milliseconds\n", (currentTick - gpu_watchdog_timer));
             printf("ERROR: Device timeout detected. It's been over %d seconds since we've heard back from the worker thread.\n", gpu_watchdog_max_wait);
             exit(1);
         }
 
-        if( currentTick >= timerPrintDetails )
-        {
+        if ( currentTick >= timerPrintDetails ) {
             // print details only when connected
-            if( xptClient_isDisconnected(xptClient, NULL) == false )
-            {
+            if ( xptClient_isDisconnected(xptClient, NULL) == false ) {
                 uint32 passedSeconds = (uint32)time(NULL) - miningStartTime;
                 double speedRate = 0.0;
                 double tableRate = 0.0;
                 double sharesPerHour = 0.0;
-                if( workDataSource.algorithm == ALGORITHM_PROTOSHARES )
-                {
+
+                if ( workDataSource.algorithm == ALGORITHM_PROTOSHARES ) {
                     // speed is represented as khash/s (in steps of 0x8000)
-                    if( passedSeconds > 5 ) {
+                    if ( passedSeconds > 5 ) {
                         speedRate = (double)totalCollisionCount / (double)passedSeconds * 60.0;
                         tableRate = (double)totalTableCount / (double)passedSeconds * 60;
                         printf("collisions/min: %.2lf (%s %.1f%%), tables/min: %.2lf; Shares total: %ld (Valid: %ld, Invalid: %ld",
-                            speedRate, PLUS_MINUS, 100.0 / pow((double)totalTableCount, 0.5), tableRate, totalShareCount, (totalShareCount-invalidShareCount), invalidShareCount);
+                               speedRate, PLUS_MINUS, 100.0 / pow((double)totalTableCount, 0.5), tableRate, totalShareCount, (totalShareCount - invalidShareCount), invalidShareCount);
 
                         if ( passedSeconds > 900 ) {
                             sharesPerHour = (double)curShareCount / (double)passedSeconds * 3600.0;
@@ -278,11 +278,12 @@ void xptMiner_xptQueryWorkLoop()
                 }
 
             }
+
             timerPrintDetails = currentTick + 8000;
         }
+
         // check stats
-        if( xptClient_isDisconnected(xptClient, NULL) == false )
-        {
+        if ( xptClient_isDisconnected(xptClient, NULL) == false ) {
             EnterCriticalSection(&cs_xptClient);
 
             // We've reached the time limit for the current user, switch to the next one
@@ -312,6 +313,7 @@ void xptMiner_xptQueryWorkLoop()
                 xptClient_connect(xptClient, &minerSettings.requestTarget);
 
                 double mining_length = (cur_payout_info.payout_pct * (double)payout_len) / 1000.0;
+
                 if (cur_payout_info.is_developer) {
                     if (!prev_user_was_dev) {
                         printf("\nMining for a few moments to support future development\n", mining_length);
@@ -325,8 +327,8 @@ void xptMiner_xptQueryWorkLoop()
 
 
             xptClient_process(xptClient);
-            if( xptClient->disconnected )
-            {
+
+            if ( xptClient->disconnected ) {
                 // mark work as invalid
                 EnterCriticalSection(&workDataSource.cs_work);
                 workDataSource.height = 0;
@@ -372,12 +374,9 @@ void xptMiner_xptQueryWorkLoop()
                 }
 
                 Sleep(15000);
-            }
-            else
-            {
+            } else {
                 // is known algorithm?
-                if( xptClient->clientState == XPT_CLIENT_STATE_LOGGED_IN && (xptClient->algorithm != ALGORITHM_PROTOSHARES) )
-                {
+                if ( xptClient->clientState == XPT_CLIENT_STATE_LOGGED_IN && (xptClient->algorithm != ALGORITHM_PROTOSHARES) ) {
                     // force disconnect
                     xptClient_forceDisconnect(xptClient);
                     LeaveCriticalSection(&cs_xptClient);
@@ -395,7 +394,7 @@ void xptMiner_xptQueryWorkLoop()
                         printf("\tE - BADALGO\n");
                         printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
                         printf("\n\n");
-                        
+
                     } else {
                         printf("The login '%s' is configured for an unsupported algorithm.\n", xptClient->username);
                         printf("Make sure you miner login details are correct\n");
@@ -413,43 +412,34 @@ void xptMiner_xptQueryWorkLoop()
                         Sleep(5000);
                     }
 
-                }
-                else if( xptClient->blockWorkInfo.height != workDataSource.height || memcmp(xptClient->blockWorkInfo.merkleRoot, workDataSource.merkleRootOriginal, 32) != 0  )
-                {
+                } else if ( xptClient->blockWorkInfo.height != workDataSource.height || memcmp(xptClient->blockWorkInfo.merkleRoot, workDataSource.merkleRootOriginal, 32) != 0  ) {
                     // update work
                     xptMiner_getWorkFromXPTConnection(xptClient);
                     LeaveCriticalSection(&cs_xptClient);
-                }
-                else if ( xptClient->clientState != XPT_CLIENT_STATE_LOGGED_IN && (uint32)time(NULL) - miningStartTime > 120 )
-                {
+                } else if ( xptClient->clientState != XPT_CLIENT_STATE_LOGGED_IN && (uint32)time(NULL) - miningStartTime > 120 ) {
                     // There's a super annoying bug where a login response is never received from the yPool servers.
                     // To prevent permanently being stuck in limbo, force a disconnect and reconnect by swapping users.
                     printf("Network issues detected, attempting to reconnect.\n");
                     load_next_user = true;
                     LeaveCriticalSection(&cs_xptClient);
-                }
-                else
-                {
+                } else {
                     LeaveCriticalSection(&cs_xptClient);
                 }
+
                 Sleep(1);
 
                 // The time only counts if we're actually logged in
                 cur_payout_round_length += (xptClient->gotLoginResponse ? getTimeMilliseconds() - currentTick : 0);
             }
-        }
-        else
-        {
+        } else {
             // initiate new connection
             EnterCriticalSection(&cs_xptClient);
-            if( xptClient_connect(xptClient, &minerSettings.requestTarget) == false )
-            {
+
+            if ( xptClient_connect(xptClient, &minerSettings.requestTarget) == false ) {
                 LeaveCriticalSection(&cs_xptClient);
                 printf("Connection attempt failed, retry in 15 seconds\n");
                 Sleep(15000);
-            }
-            else
-            {
+            } else {
                 LeaveCriticalSection(&cs_xptClient);
                 printf("Connected to server using x.pushthrough(xpt) protocol\n");
                 miningStartTime = (uint32)time(NULL);
@@ -457,6 +447,7 @@ void xptMiner_xptQueryWorkLoop()
                 totalTableCount = 0;
                 curShareCount = 0;
             }
+
             Sleep(1);
         }
     }
@@ -502,116 +493,108 @@ void xptMiner_parseCommandline(int argc, char **argv)
     uint32 target_mem   =  0;
     uint32 nonce_bits   = 26;
 
-    while( cIdx < argc )
-    {
+    while ( cIdx < argc ) {
         char* argument = argv[cIdx];
         cIdx++;
-        if( memcmp(argument, "-o", 3)==0 || memcmp(argument, "-O", 3)==0 )
-        {
+
+        if ( memcmp(argument, "-o", 3) == 0 || memcmp(argument, "-O", 3) == 0 ) {
             // -o
-            if( cIdx >= argc )
-            {
+            if ( cIdx >= argc ) {
                 printf("Missing URL after -o option\n");
                 exit(0);
             }
-            if( strstr(argv[cIdx], "http://") )
-                commandlineInput.host = _strdup(strstr(argv[cIdx], "http://")+7);
-            else
+
+            if ( strstr(argv[cIdx], "http://") ) {
+                commandlineInput.host = _strdup(strstr(argv[cIdx], "http://") + 7);
+            } else {
                 commandlineInput.host = _strdup(argv[cIdx]);
-            char* portStr = strstr(commandlineInput.host, ":");
-            if( portStr )
-            {
-                *portStr = '\0';
-                commandlineInput.port = atoi(portStr+1);
             }
+
+            char* portStr = strstr(commandlineInput.host, ":");
+
+            if ( portStr ) {
+                *portStr = '\0';
+                commandlineInput.port = atoi(portStr + 1);
+            }
+
             cIdx++;
-        }
-        else if( memcmp(argument, "-u", 3)==0 )
-        {
+        } else if ( memcmp(argument, "-u", 3) == 0 ) {
             // -u
-            if( cIdx >= argc )
-            {
+            if ( cIdx >= argc ) {
                 printf("Missing username/workername after -u option\n");
                 exit(0);
             }
+
             commandlineInput.workername = _strdup(argv[cIdx]);
             cIdx++;
-        }
-        else if( memcmp(argument, "-p", 3)==0 )
-        {
+        } else if ( memcmp(argument, "-p", 3) == 0 ) {
             // -p
-            if( cIdx >= argc )
-            {
+            if ( cIdx >= argc ) {
                 printf("Missing password after -p option\n");
                 exit(0);
             }
+
             commandlineInput.workerpass = _strdup(argv[cIdx]);
             cIdx++;
-        }
-        else if( memcmp(argument, "-t", 3)==0 )
-        {
+        } else if ( memcmp(argument, "-t", 3) == 0 ) {
             // -t
-            if( cIdx >= argc )
-            {
+            if ( cIdx >= argc ) {
                 printf("Missing thread number after -t option\n");
                 exit(0);
             }
+
             commandlineInput.numThreads = atoi(argv[cIdx]);
-            if( commandlineInput.numThreads < 1 || commandlineInput.numThreads > 128 )
-            {
+
+            if ( commandlineInput.numThreads < 1 || commandlineInput.numThreads > 128 ) {
                 printf("-t parameter out of range");
                 exit(0);
             }
+
             cIdx++;
-        }
-        else if( memcmp(argument, "-f", 3)==0 )
-        {
-            if( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-f", 3) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing amount number after -f option\n");
                 exit(0);
             }
+
             float pct = atof(argv[cIdx]);
-            if (pct <   2.5) { pct = 2.5;   }
+
+            if (pct <   3.0) { pct = 3.0;   }
             if (pct > 100.0) { pct = 100.0; }
+
             commandlineInput.donationPercent = pct;
 
             cIdx++;
-        }
-        else if( memcmp(argument, "-list-devices", 14)==0 )
-        {
+        } else if ( memcmp(argument, "-list-devices", 14) == 0 ) {
             commandlineInput.listDevices = true;
-        }
-        else if( memcmp(argument, "-device", 8)==0 || memcmp(argument, "-d", 3)==0 || memcmp(argument, "-devices", 9)==0)
-        {
+        } else if ( memcmp(argument, "-device", 8) == 0 || memcmp(argument, "-d", 3) == 0 || memcmp(argument, "-devices", 9) == 0) {
             // -d
-            if( cIdx >= argc )
-            {
+            if ( cIdx >= argc ) {
                 printf("Missing device list after %s option\n", argument);
                 exit(0);
             }
+
             std::string list = std::string(argv[cIdx]);
             std::string delimiter = ",";
             size_t pos = 0;
+
             while ((pos = list.find(delimiter)) != std::string::npos) {
                 std::string token = list.substr(0, pos);
                 commandlineInput.deviceList.push_back(atoi(token.c_str()));
                 list.erase(0, pos + delimiter.length());
             }
+
             commandlineInput.deviceList.push_back(atoi(list.c_str()));
             cIdx++;
-        }
-        else if( memcmp(argument, "-w", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-w", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing work group size after %s option\n", argument);
                 exit(0);
             }
 
             wgs = atoi(argv[cIdx]);
-            if (wgs < 0)
-            {
+
+            if (wgs < 0) {
                 printf("Work group size '%d' is invalid.  Valid values are 0 or powers of 2.\n", wgs);
                 exit(0);
             }
@@ -619,18 +602,15 @@ void xptMiner_parseCommandline(int argc, char **argv)
             // Find nearest power of two less than wgs
             wgs = nearest_pow2(wgs);
             cIdx++;
-        }
-        else if( memcmp(argument, "-v", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-v", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing vector size after %s option\n", argument);
                 exit(0);
             }
 
             vect_type = atoi(argv[cIdx]);
-            if (vect_type != 1 && vect_type != 2 && vect_type != 4)
-            {
+
+            if (vect_type != 1 && vect_type != 2 && vect_type != 4) {
                 printf("Vector size '%d' is invalid.  Valid values are 1, 2, or 4.\n", wgs);
                 exit(0);
             }
@@ -638,50 +618,38 @@ void xptMiner_parseCommandline(int argc, char **argv)
             // Find nearest power of two less than wgs
             wgs = nearest_pow2(wgs);
             cIdx++;
-        }
-        else if( memcmp(argument, "-b", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-b", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing work group size after %s option\n", argument);
                 exit(0);
             }
 
             buckets_log2 = atoi(argv[cIdx]);
-            if (buckets_log2 < 12 || buckets_log2 > 99)
-            {
+
+            if (buckets_log2 < 12 || buckets_log2 > 99) {
                 printf("Bucket quantity '%d' is invalid.  Valid values are between 12 and 26.\n", buckets_log2);
                 exit(0);
             }
 
             cIdx++;
-        }
-        else if( memcmp(argument, "-s", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-s", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing bucket size after %s option\n", argument);
                 exit(0);
             }
 
             bucket_size = atoi(argv[cIdx]);
             cIdx++;
-        }
-        else if( memcmp(argument, "-m", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-m", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing target memory size after %s option\n", argument);
                 exit(0);
             }
 
             target_mem = atoi(argv[cIdx]);
             cIdx++;
-        }
-        else if( memcmp(argument, "-n", 2)==0 )
-        {
-            if ( cIdx >= argc )
-            {
+        } else if ( memcmp(argument, "-n", 2) == 0 ) {
+            if ( cIdx >= argc ) {
                 printf("Missing nonce bits value after %s option\n", argument);
                 exit(0);
             }
@@ -692,21 +660,18 @@ void xptMiner_parseCommandline(int argc, char **argv)
                 printf("Nonce bit size '%d' is invalid.  Valid values are between 10 and 26.\n", nonce_bits);
                 exit(0);
             }
+
             cIdx++;
-        }
-        else if( memcmp(argument, "-help", 6)==0 || memcmp(argument, "--help", 7)==0 )
-        {
+        } else if ( memcmp(argument, "-help", 6) == 0 || memcmp(argument, "--help", 7) == 0 ) {
             xptMiner_printHelp();
             exit(0);
-        }
-        else
-        {
-            printf("'%s' is an unknown option.\nType xptminer.exe --help for more info\n", argument); 
+        } else {
+            printf("'%s' is an unknown option.\nType xptminer.exe --help for more info\n", argument);
             exit(-1);
         }
     }
-    if( argc <= 1 )
-    {
+
+    if ( argc <= 1 ) {
         xptMiner_printHelp();
         exit(0);
     }
@@ -728,12 +693,12 @@ int main(int argc, char** argv)
 
     commandlineInput.host = "ypool.net";
     srand(getTimeMilliseconds());
-    commandlineInput.port = 8080 + (rand()%8); // use random port between 8080 and 8087
+    commandlineInput.port = 8080 + (rand() % 8); // use random port between 8080 and 8087
     commandlineInput.ptsMemoryMode = PROTOSHARE_MEM_256;
-    uint32_t numcpu = 1; // in case we fall through;	
+    uint32_t numcpu = 1; // in case we fall through;
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
     int mib[4];
-    size_t len = sizeof(numcpu); 
+    size_t len = sizeof(numcpu);
 
     /* set the mib for hw.ncpu */
     mib[0] = CTL_HW;
@@ -745,8 +710,7 @@ int main(int argc, char** argv)
     /* get the number of CPUs from the system */
     sysctl(mib, 2, &numcpu, &len, NULL, 0);
 
-    if( numcpu < 1 )
-    {
+    if ( numcpu < 1 ) {
         numcpu = 1;
     }
 
@@ -792,29 +756,32 @@ int main(int argc, char** argv)
     SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
     // init winsock
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2,2),&wsa);
+    WSAStartup(MAKEWORD(2, 2), &wsa);
 
     // get IP of pool url (default ypool.net)
     char* poolURL = commandlineInput.host;
+
     // Convert to lowercase
     for (uint8 i = 0; poolURL[i] > 0; i++) {
         if (poolURL[i] >= 'A' && poolURL[i] <= 'Z') { poolURL[i] += ('a' - 'A'); }
     }
 
     hostent* hostInfo = gethostbyname(poolURL);
-    if( hostInfo == NULL )
-    {
+
+    if ( hostInfo == NULL ) {
         printf("Cannot resolve '%s'. Is it a valid URL?\n", poolURL);
         exit(-1);
     }
+
     void** ipListPtr = (void**)hostInfo->h_addr_list;
     uint32 ip = 0xFFFFFFFF;
-    if( ipListPtr[0] )
-    {
+
+    if ( ipListPtr[0] ) {
         ip = *(uint32*)ipListPtr[0];
     }
+
     char* ipText = (char*)malloc(32);
-    sprintf(ipText, "%d.%d.%d.%d", ((ip>>0)&0xFF), ((ip>>8)&0xFF), ((ip>>16)&0xFF), ((ip>>24)&0xFF));
+    sprintf(ipText, "%d.%d.%d.%d", ((ip >> 0) & 0xFF), ((ip >> 8) & 0xFF), ((ip >> 16) & 0xFF), ((ip >> 24) & 0xFF));
     // init work source
     InitializeCriticalSection(&workDataSource.cs_work);
     InitializeCriticalSection(&cs_xptClient);
@@ -828,9 +795,11 @@ int main(int argc, char** argv)
     // inits GPU
     printf("Available devices:\n");
     OpenCLMain::getInstance().listDevices();
+
     if (commandlineInput.listDevices) {
         exit(0);
     }
+
     if (commandlineInput.deviceList.empty()) {
         for (int i = 0; i < commandlineInput.numThreads; i++) {
             commandlineInput.deviceList.push_back(i);
@@ -838,17 +807,20 @@ int main(int argc, char** argv)
     } else {
         commandlineInput.numThreads = commandlineInput.deviceList.size();
     }
+
     printf("\n");
     printf("Adjusting num threads to match device list: %d\n", commandlineInput.numThreads);
 
     // inits all GPU devices
     printf("\n");
     printf("Initializing workers...\n");
+
     for (int i = 0; i < commandlineInput.deviceList.size(); i++) {
         printf("Initing device %d...\n", i);
         gpu_processors.push_back(new ProtoshareOpenCL(commandlineInput.deviceList[i]));
 
     }
+
     printf("\nAll GPUs Initialized...\n");
     printf("\n");
     printf("\n");
@@ -860,7 +832,7 @@ int main(int argc, char** argv)
     // Add GigaWatt to developer fee payout
     payout_temp.workername = _strdup(strstr(poolURL, "ypool") != NULL ? "gigawatt.pts_dev" : "PbwHkEs9ieWdfJPsowoWingrKyND2uML9s");
     payout_temp.workerpass = "x";
-    payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
+    payout_temp.payout_pct = commandlineInput.donationPercent * 2.0 / 3.0;
     payout_temp.is_developer = true;
     total_payout -= payout_temp.payout_pct;
     payout_list.push_back( payout_temp );
@@ -868,7 +840,7 @@ int main(int argc, char** argv)
     // Add Girino to developer fee payout
     payout_temp.workername = _strdup(strstr(poolURL, "ypool") != NULL ? "girino.pts_dev" : "Pr7StLq25Z9nzJ3cG4QNxMwrw9rpid29Py");
     payout_temp.workerpass = "x";
-    payout_temp.payout_pct = commandlineInput.donationPercent / 2.0;
+    payout_temp.payout_pct = commandlineInput.donationPercent * 1.0 / 2.0;
     payout_temp.is_developer = true;
     total_payout -= payout_temp.payout_pct;
     payout_list.push_back( payout_temp );
@@ -882,7 +854,7 @@ int main(int argc, char** argv)
 
 
     // start miner threads
-    for(uint32 i=0; i<commandlineInput.numThreads; i++) {
+    for (uint32 i = 0; i < commandlineInput.numThreads; i++) {
         CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)xptMiner_minerThread, (LPVOID)0, 0, NULL);
     }
 

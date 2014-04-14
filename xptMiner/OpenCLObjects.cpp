@@ -299,7 +299,7 @@ bool OpenCLDevice::isGPU() {
     cl_device_type value;
     check_error(clGetDeviceInfo(my_id, CL_DEVICE_TYPE, (sizeof(cl_device_type)), &value, NULL));
 
-    return (value & CL_DEVICE_TYPE_GPU > 0);
+    return (value & CL_DEVICE_TYPE_GPU);
 }
 
 std::vector<long> OpenCLDevice::getMaxWorkItemSizes() {

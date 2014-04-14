@@ -8,9 +8,9 @@
 #include "momentumOpenCL.hpp";
 
 #define MAX_NONCE_BITS          ( 26 )
-#define MAX_MOMENTUM_NONCE		( 1 << MAX_NONCE_BITS )
-#define SEARCH_SPACE_BITS		( 50 )
-#define BIRTHDAYS_PER_HASH		( 8 )
+#define MAX_MOMENTUM_NONCE      ( 1 << MAX_NONCE_BITS )
+#define SEARCH_SPACE_BITS       ( 50 )
+#define BIRTHDAYS_PER_HASH      ( 8 )
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 // #define NOSUBMIT
@@ -34,9 +34,12 @@ extern uint32 gpu_watchdog_max_wait;
 
 extern commandlineInput_t commandlineInput;
 
-double factorial(uint32_t n) {
+double factorial(uint32_t n)
+{
     if (n == 0) { return 1; }
+
     double rtn = n;
+
     while (--n > 0) { rtn *= n; }
 
     return rtn;
@@ -44,7 +47,8 @@ double factorial(uint32_t n) {
 
 // Estimates the number of dropped records based on bucket size, number of buckets, and number of elements
 // https://en.wikipedia.org/wiki/Poisson_distribution
-double poisson_estimate(double buckets, double items, double bucket_size) {
+double poisson_estimate(double buckets, double items, double bucket_size)
+{
     double total_drops = 0;
     double f = factorial(bucket_size);
     uint32 trials = (items / buckets) * 2;
@@ -54,7 +58,7 @@ double poisson_estimate(double buckets, double items, double bucket_size) {
         f *= i;
 
         total_drops += (buckets * (i - bucket_size) * pow(items / buckets, (double)i))
-            / (exp(items / buckets) * f);
+                       / (exp(items / buckets) * f);
     }
 
     return (total_drops / items);
@@ -64,30 +68,31 @@ double poisson_estimate(double buckets, double items, double bucket_size) {
 size_t calc_hash_mem_usage() { return sizeof(cl_ulong) * MAX_MOMENTUM_NONCE; }
 size_t calc_map_mem_usage(uint32 buckets_log2, uint32 bucket_size) { return sizeof(cl_uint) * ((uint64)1 << buckets_log2) * bucket_size; }
 
-size_t calc_total_mem_usage(uint32 buckets_log2, uint32 bucket_size) {
+size_t calc_total_mem_usage(uint32 buckets_log2, uint32 bucket_size)
+{
     return calc_hash_mem_usage() + calc_map_mem_usage(buckets_log2, bucket_size);
 }
 
 
 bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midHash, uint32 indexA, uint32 indexB)
 {
-    uint8 tempHash[32+4];
+    uint8 tempHash[32 + 4];
     uint64 resultHash[8];
-    memcpy(tempHash+4, midHash, 32);
+    memcpy(tempHash + 4, midHash, 32);
     // get birthday A
-    *(uint32*)tempHash = indexA&~7; // indexA & ~7 == indexA - (indexA % BIRTHDAYS_PER_HASH)
+    *(uint32*)tempHash = indexA & ~7; // indexA & ~7 == indexA - (indexA % BIRTHDAYS_PER_HASH)
     sha512_ctx c512;
     sha512_init(&c512);
-    sha512_update(&c512, tempHash, 32+4);
+    sha512_update(&c512, tempHash, 32 + 4);
     sha512_final(&c512, (unsigned char*)resultHash);
-    uint64 birthdayA = resultHash[indexA&7] >> (64ULL-SEARCH_SPACE_BITS);
+    uint64 birthdayA = resultHash[indexA & 7] >> (64ULL - SEARCH_SPACE_BITS);
 
     // get birthday B
-    *(uint32*)tempHash = indexB&~7;
+    *(uint32*)tempHash = indexB & ~7;
     sha512_init(&c512);
-    sha512_update(&c512, tempHash, 32+4);
+    sha512_update(&c512, tempHash, 32 + 4);
     sha512_final(&c512, (unsigned char*)resultHash);
-    uint64 birthdayB = resultHash[indexB&7] >> (64ULL-SEARCH_SPACE_BITS);
+    uint64 birthdayB = resultHash[indexB & 7] >> (64ULL - SEARCH_SPACE_BITS);
 
 #ifdef VERIFY_RESULTS
     printf("Nonce Pair:\n");
@@ -96,8 +101,7 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     printf("\n");
 #endif
 
-    if( birthdayA != birthdayB )
-    {
+    if ( birthdayA != birthdayB ) {
         return false; // invalid collision
     }
 
@@ -110,7 +114,7 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     uint8 proofOfWorkHash[32];
     sha256_ctx c256;
     sha256_init(&c256);
-    sha256_update(&c256, (unsigned char*)block, 80+8);
+    sha256_update(&c256, (unsigned char*)block, 80 + 8);
     sha256_final(&c256, proofOfWorkHash);
     sha256_init(&c256);
     sha256_update(&c256, (unsigned char*)proofOfWorkHash, 32);
@@ -118,32 +122,30 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     bool hashMeetsTarget = true;
     uint32* generatedHash32 = (uint32*)proofOfWorkHash;
     uint32* targetHash32 = (uint32*)block->targetShare;
-    for(sint32 hc=7; hc>=0; hc--)
-    {
-        if( generatedHash32[hc] < targetHash32[hc] )
-        {
+
+    for (sint32 hc = 7; hc >= 0; hc--) {
+        if ( generatedHash32[hc] < targetHash32[hc] ) {
             hashMeetsTarget = true;
             break;
-        }
-        else if( generatedHash32[hc] > targetHash32[hc] )
-        {
+        } else if ( generatedHash32[hc] > targetHash32[hc] ) {
             hashMeetsTarget = false;
             break;
         }
     }
-    if( hashMeetsTarget )
-    {
+
+    if ( hashMeetsTarget ) {
         totalShareCount++;
         curShareCount++;
 #ifndef NOSUBMIT
         xptMiner_submitShare(block);
 #endif
     }
+
     // get full block hash (for B A)
     block->birthdayA = indexB;
     block->birthdayB = indexA;
     sha256_init(&c256);
-    sha256_update(&c256, (unsigned char*)block, 80+8);
+    sha256_update(&c256, (unsigned char*)block, 80 + 8);
     sha256_final(&c256, proofOfWorkHash);
     sha256_init(&c256);
     sha256_update(&c256, (unsigned char*)proofOfWorkHash, 32);
@@ -151,32 +153,31 @@ bool protoshares_revalidateCollision(minerProtosharesBlock_t* block, uint8* midH
     hashMeetsTarget = true;
     generatedHash32 = (uint32*)proofOfWorkHash;
     targetHash32 = (uint32*)block->targetShare;
-    for(sint32 hc=7; hc>=0; hc--)
-    {
-        if( generatedHash32[hc] < targetHash32[hc] )
-        {
+
+    for (sint32 hc = 7; hc >= 0; hc--) {
+        if ( generatedHash32[hc] < targetHash32[hc] ) {
             hashMeetsTarget = true;
             break;
-        }
-        else if( generatedHash32[hc] > targetHash32[hc] )
-        {
+        } else if ( generatedHash32[hc] > targetHash32[hc] ) {
             hashMeetsTarget = false;
             break;
         }
     }
-    if( hashMeetsTarget )
-    {
+
+    if ( hashMeetsTarget ) {
         totalShareCount++;
         curShareCount++;
 #ifndef NOSUBMIT
         xptMiner_submitShare(block);
 #endif
     }
+
     return true;
 }
 
 
-ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
+ProtoshareOpenCL::ProtoshareOpenCL(int _device_num)
+{
     this->device_num = _device_num;
 
     printf("Initializing GPU %d\n", device_num);
@@ -228,6 +229,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
         // Lazy calculation, assume large bucket_size, scale back from there
         bucket_size = 1024;
+
         while (bucket_size > 0 && calc_total_mem_usage(buckets_log2, bucket_size) > target_mem_temp) { bucket_size--; }
 
         // Make sure the parameter configuration is sane:
@@ -243,6 +245,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     // Make sure we can allocate hash_list (cannot violate CL_DEVICE_MAX_MEM_ALLOC_SIZE)
     if (std::max(calc_hash_mem_usage(), calc_map_mem_usage(buckets_log2, bucket_size)) > device->getMaxMemAllocSize()) {
         while (bucket_size > 0 && calc_map_mem_usage(buckets_log2, bucket_size) > device->getMaxMemAllocSize()) { bucket_size--; }
+
         if (bucket_size < 1) {
             printf("ERROR: Device %d cannot allocate hash list using 2^%d buckets!\n", device_num, buckets_log2);
             printf("       Please lower the value of \"-b\" or increase \"-m\".\n");
@@ -260,11 +263,12 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
     // Because bucket_size is limited by CL_DEVICE_MAX_MEM_ALLOC_SIZE, I don't think
     //   it's possible to actually reach this.
     uint32 required_mem = calc_total_mem_usage(buckets_log2, bucket_size);
+
     if (required_mem > device->getGlobalMemSize()) {
         printf("ERROR: Device %d cannot store 2^%d buckets of %d elements!\n", device_num, buckets_log2, bucket_size);
         printf("       You require %d MB of memory but only have %d MB available.\n",
-            required_mem / 1024 / 1024,
-            device->getGlobalMemSize() / 1024 / 1024);
+               required_mem / 1024 / 1024,
+               device->getGlobalMemSize() / 1024 / 1024);
         printf("       Consider setting a target memory usage with \"-m\".\n");
         exit(0);
     }
@@ -279,7 +283,7 @@ ProtoshareOpenCL::ProtoshareOpenCL(int _device_num) {
 
 
     bool isGPU = device->isGPU();
-    if (!isGPU) { gpu_watchdog_max_wait *= 10; } // Effectively disable the watchdog
+    if (!isGPU) { gpu_watchdog_max_wait *= 6; } // Effectively disable the watchdog
 
     std::stringstream params;
     params << " -I ./opencl/";
@@ -327,7 +331,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 #endif
 
     block->nonce = 0;
-    uint32 target = *(uint32*)(block->targetShare+28);
+    uint32 target = *(uint32*)(block->targetShare + 28);
     // OpenCLDevice* device = OpenCLMain::getInstance().getDevice(device_num);
 
     uint32 midHash[8];
@@ -418,28 +422,31 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
 #ifdef MEASURE_TIME
     uint32 end = getTimeMilliseconds();
     uint32 warmup_skips = 3;
+
     if (totalTableCount > warmup_skips) { // Allow some warmup time
         totalOverhead   += (overhead - begin);
-        totalHashTime   += (hash_end-begin);
-        totalInsertTime += (insert_end-hash_end);
-        totalResetTime  += (end-insert_end);
+        totalHashTime   += (hash_end - begin);
+        totalInsertTime += (insert_end - hash_end);
+        totalResetTime  += (end - insert_end);
     }
+
     printf("Found %2d collisions in %4d ms (Hash: %4d ms, Insert: %4d ms, Reset: %4d ms, Overhead: %4d)\n",
-            result_qty * 2,
-            (end - begin),
-            (hash_end - begin),
-            (insert_end - hash_end),
-            (end - insert_end),
-            (overhead - begin));
+           result_qty * 2,
+           (end - begin),
+           (hash_end - begin),
+           (insert_end - hash_end),
+           (end - insert_end),
+           (overhead - begin));
 
     if (totalTableCount > 0 && totalTableCount % 10 == 0) {
         printf("\nAVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d, Overhead: %4d\n\n",
-            (totalHashTime + totalInsertTime + totalResetTime) / (totalTableCount - warmup_skips),
-            totalHashTime   / (totalTableCount - warmup_skips),
-            totalInsertTime / (totalTableCount - warmup_skips),
-            totalResetTime  / (totalTableCount - warmup_skips),
-            totalOverhead   / (totalTableCount - warmup_skips));
+               (totalHashTime + totalInsertTime + totalResetTime) / (totalTableCount - warmup_skips),
+               totalHashTime   / (totalTableCount - warmup_skips),
+               totalInsertTime / (totalTableCount - warmup_skips),
+               totalResetTime  / (totalTableCount - warmup_skips),
+               totalOverhead   / (totalTableCount - warmup_skips));
     }
+
 #endif
 
     for (uint32 i = 0; i < result_qty; i++) {
