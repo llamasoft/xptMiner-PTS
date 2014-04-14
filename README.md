@@ -27,7 +27,7 @@ sudo apt-get -y install build-essential m4 openssl libssl-dev git libjson0 libjs
 Building
 ========
 ```
-git clone https://github.com/clintar/xptMiner.git
-cd xptMiner
+git clone https://github.com/llamasoft/xptMiner-PTS.git
+cd xptMiner-PTS
 make
 ```

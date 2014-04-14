@@ -424,7 +424,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
     uint32 warmup_skips = 3;
 
     if (totalTableCount > warmup_skips) { // Allow some warmup time
-        totalOverhead   += (overhead - begin);
+        totalOverhead   += (begin - overhead);
         totalHashTime   += (hash_end - begin);
         totalInsertTime += (insert_end - hash_end);
         totalResetTime  += (end - insert_end);
@@ -436,7 +436,7 @@ void ProtoshareOpenCL::protoshare_process(minerProtosharesBlock_t* block)
            (hash_end - begin),
            (insert_end - hash_end),
            (end - insert_end),
-           (overhead - begin));
+           (begin - overhead));
 
     if (totalTableCount > 0 && totalTableCount % 10 == 0) {
         printf("\nAVG TIMES - Total: %4d, Hash: %4d, Insert: %4d, Reset: %4d, Overhead: %4d\n\n",
