@@ -87,6 +87,21 @@ On Windows systems, the command will be "setx GPU_MAX_ALLOC_PERCENT 100".
 Lastly, be sure to test only one device at a time and for at least 10 minutes on each setting.
 Failure to do so *will* result in inaccurate performance measurements.
 
+
+Automatic Approach:
+---------------------
+In order to use the automatic benchmark, you'll need to be on a Linux system or use Cygwin under Windows.
+Simply run the "bench.sh" script and supply the base miner parameters (such as work group size and device number).
+
+Usage: ./bench.sh [miner_opts]
+Example: ./bench.sh -d 0 -w 128
+
+The script will take a few hours to run, so it's best to let it run overnight.
+The final results and parameters will be displayed and stored as bench_results.log
+
+
+Manual Approcah:
+------------------
 1) Using the table listed above, look down the "-s 1" column to find the largest value of "-b"
    that's less than or equal to the amount of memory that your GPU has available.
    For example, if your GPU has 2048 MB of memory, "-b 28" is the highest.
@@ -107,5 +122,6 @@ Failure to do so *will* result in inaccurate performance measurements.
    For example: try adding "-n 25", if it's better then try "-n 24" instead, etc.
 
 [optional] 6) Try also adding the "-v 2" or "-v 4" options.
+
 
 Congratulations!  You've found the best configuration for your mining setup!
