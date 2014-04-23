@@ -11,7 +11,7 @@
 #define MAX_MOMENTUM_NONCE      ( 1 << MAX_NONCE_BITS )
 #define SEARCH_SPACE_BITS       ( 50 )
 #define BIRTHDAYS_PER_HASH      ( 8 )
-#define USE_SOURCE
+// #define USE_SOURCE
 // #define MEASURE_TIME
 // #define VERIFY_RESULTS
 // #define NOSUBMIT

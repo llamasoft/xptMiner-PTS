@@ -48,7 +48,7 @@ for b in 24 25 26 27 28 29; do
             rm ${log_name}
         else
             echo "           Result: $(grep ^collisions ${log_name} | tail -n 1 | sed 's/;.*//')"
-            cur_cpm=$(grep ^collision ${log_name} | awk '{ print $2; }' | tr -d '.')
+            cur_cpm=$(grep ^collision ${log_name} | awk '{ print $2; }' | tail -n 1 | tr -d '.')
             if (( cur_cpm > best_cpm )); then
                 best_cpm="${cur_cpm}"
                 best_params="${cur_params}"
